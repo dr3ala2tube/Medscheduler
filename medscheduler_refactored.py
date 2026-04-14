@@ -163,7 +163,11 @@ def auto_schedule(
         If the locked specialty is blocked on a particular day the physician
         receives a day-off (O) for that day while the lock remains intact.
       - Maximum 6 consecutive working days.
-      - Monthly hours: soft cap 160 h (→ O), hard ceiling 168 h (duty blocked).
+      - Monthly hours: floor 160 h, hard ceiling 168 h.
+          Plain O days are converted to 8-h morning shifts (Phase 8) to
+          reach the 160 h floor, unless the shortfall is caused by L
+          (annual leave) or R (random off day) or user-pinned O days.
+          The 168 h hard ceiling is always respected.
 
     Soft goals:
       - 1 DM + 1 DF per calendar day.
@@ -965,6 +969,65 @@ def auto_schedule(
             _rph = _subs_pool[0]
             setv(_rph.id, _d, _team)       # redirect to uncovered TEAM
             lock_map[_rph.id] = _team      # update lock for future days
+
+    # ------------------------------------------------------------------
+    # Phase 8 – Minimum hours enforcement (≥ 160 h per month)
+    #
+    # Hard rule: every physician must work at least 160 h per month.
+    # The only legitimate reasons to fall below 160 h are:
+    #   • Annual leave (L) – immovable, counts as zero working hours.
+    #   • Random off day (R) – immovable, counts as zero working hours.
+    #   • Manually assigned off day (O) that was pinned by the user.
+    #
+    # For any physician who is still below 160 h after Phase 7.5,
+    # this phase converts plain "O" (day-off) slots — those not
+    # hard-blocked by L/R or manually pinned — into 8-hour morning
+    # shifts until the 160 h floor is reached or no further O days
+    # are available.
+    #
+    # Constraints respected during conversion:
+    #   • Hard 168 h ceiling is never exceeded.
+    #   • 6-consecutive-day limit is never violated.
+    #   • L, R, PC, and user-pinned days are never touched.
+    # ------------------------------------------------------------------
+    for ph in docs:
+        if calc_h(ph.id) >= 160:
+            continue   # already meets the minimum
+
+        # Collect plain O days that are eligible for conversion:
+        # not hard-blocked (L/R/FDD), not manually pinned.
+        convertible = sorted(
+            d for d in range(1, td + 1)
+            if get(ph.id, d) == "O"
+            and d not in hb[ph.id]
+            and d not in pinned[ph.id]
+        )
+
+        for d in convertible:
+            if calc_h(ph.id) >= 160:
+                break   # floor reached
+
+            # Respect 168 h hard ceiling
+            if calc_h(ph.id) + 8 > 168:
+                break
+
+            # Respect 6-consecutive-day limit
+            streak_before = consecutive_working_days_before(ph.id, d)
+            streak_after  = preplaced_working_days_after(ph.id, d)
+            if streak_before + 1 + streak_after > 6:
+                continue   # converting this O would create a forbidden streak
+
+            # Determine the best 8-hour code to assign.
+            # Prefer the physician's locked/preferred specialty; fall back
+            # to their IM team code.  If the preferred spec is blocked on
+            # this day, use the team code instead.
+            best_code = pref_spec.get(ph.id) or ph.team
+            if best_code not in MORNING_K:
+                best_code = ph.team
+            if is_spec_blocked(best_code, d):
+                best_code = ph.team if ph.team in MORNING_K else "T1"
+
+            setv(ph.id, d, best_code)
 
     return {"a": a, "pairs": pairs}
 
