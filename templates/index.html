@@ -44,6 +44,8 @@ header{background:var(--primary);color:#fff;display:flex;flex-direction:column;f
 #month-label{font-weight:700;font-size:.95rem;min-width:120px;text-align:center}
 .hdr-btn{background:rgba(255,255,255,.15);border:none;color:#fff;padding:5px 11px;border-radius:7px;font-size:.8rem;font-weight:600;cursor:pointer;white-space:nowrap;transition:background .15s;height:30px;display:flex;align-items:center;gap:4px}
 .hdr-btn:hover{background:rgba(255,255,255,.28)}
+.hdr-btn:disabled{opacity:.45;cursor:not-allowed}
+.hdr-btn:disabled:hover{background:rgba(255,255,255,.15)}
 .hdr-btn.danger{background:rgba(220,38,38,.5)}
 .hdr-btn.danger:hover{background:rgba(220,38,38,.8)}
 .hdr-sep{width:1px;height:22px;background:rgba(255,255,255,.25);margin:0 2px;flex-shrink:0}
@@ -193,6 +195,8 @@ table.summary .high{color:var(--danger);font-weight:700}
       <button class="hdr-btn" id="btn-save">☁ Save</button>
       <button class="hdr-btn" id="btn-load">⬇ Load</button>
       <div class="hdr-sep"></div>
+      <button class="hdr-btn" id="undoBtn" type="button" disabled>↶ Undo</button>
+      <button class="hdr-btn" id="redoBtn" type="button" disabled>↷ Redo</button>
       <button class="hdr-btn danger" id="btn-clear">🗑 Clear Month</button>
     </div>
   </header>
@@ -345,6 +349,90 @@ const S = {
   editing: null,  // {pid, day}
 };
 
+// ── Undo / Redo history ─────────────────────────────────────────────
+const HISTORY_LIMIT = 50;
+let undoStack = [];
+let redoStack = [];
+
+function deepClone(obj){
+  return JSON.parse(JSON.stringify(obj));
+}
+function captureHistoryState(){
+  return deepClone({
+    yr:S.yr, mo:S.mo,
+    docs:S.docs,
+    asgn:S.asgn,
+    leaves:S.leaves,
+    spec_blocks:S.spec_blocks,
+    manual_asgns:S.manual_asgns,
+    next_doc_id:S.next_doc_id,
+    next_leave_id:S.next_leave_id,
+    next_spec_block_id:S.next_spec_block_id,
+    next_manual_id:S.next_manual_id
+  });
+}
+function restoreHistoryState(state){
+  S.yr = state.yr;
+  S.mo = state.mo;
+  S.docs = deepClone(state.docs);
+  S.asgn = deepClone(state.asgn);
+  S.leaves = deepClone(state.leaves);
+  S.spec_blocks = deepClone(state.spec_blocks);
+  S.manual_asgns = deepClone(state.manual_asgns);
+  S.next_doc_id = state.next_doc_id;
+  S.next_leave_id = state.next_leave_id;
+  S.next_spec_block_id = state.next_spec_block_id;
+  S.next_manual_id = state.next_manual_id;
+  renderAll();
+  if(document.querySelector('.tab[data-tab="summary"]')?.classList.contains('active')) renderSummary();
+  updateUndoRedoButtons();
+}
+function pushUndoState(){
+  undoStack.push(captureHistoryState());
+  if(undoStack.length > HISTORY_LIMIT) undoStack = undoStack.slice(-HISTORY_LIMIT);
+  redoStack = [];
+  updateUndoRedoButtons();
+}
+function updateUndoRedoButtons(){
+  const undoBtn = $('undoBtn');
+  const redoBtn = $('redoBtn');
+  if(undoBtn) undoBtn.disabled = undoStack.length === 0;
+  if(redoBtn) redoBtn.disabled = redoStack.length === 0;
+}
+function resetHistory(){
+  undoStack = [];
+  redoStack = [];
+  updateUndoRedoButtons();
+}
+function undoAction(){
+  if(!undoStack.length){
+    setStatus('Nothing to undo.');
+    updateUndoRedoButtons();
+    return;
+  }
+  const current = captureHistoryState();
+  const prev = undoStack.pop();
+  redoStack.push(current);
+  if(redoStack.length > HISTORY_LIMIT) redoStack = redoStack.slice(-HISTORY_LIMIT);
+  restoreHistoryState(prev);
+  setStatus('Undo complete.');
+  toast('Undo complete.');
+}
+function redoAction(){
+  if(!redoStack.length){
+    setStatus('Nothing to redo.');
+    updateUndoRedoButtons();
+    return;
+  }
+  const current = captureHistoryState();
+  const next = redoStack.pop();
+  undoStack.push(current);
+  if(undoStack.length > HISTORY_LIMIT) undoStack = undoStack.slice(-HISTORY_LIMIT);
+  restoreHistoryState(next);
+  setStatus('Redo complete.');
+  toast('Redo complete.');
+}
+
 // ── Utility ────────────────────────────────────────────────────────
 const $  = id => document.getElementById(id);
 const p2 = n  => String(n).padStart(2,'0');
@@ -431,6 +519,8 @@ auth.onAuthStateChanged(async user => {
 });
 
 $('btn-signout').onclick = ()=> auth.signOut();
+$('undoBtn').onclick = undoAction;
+$('redoBtn').onclick = redoAction;
 
 // ── Constants ──────────────────────────────────────────────────────
 async function loadConstants(){
@@ -471,6 +561,7 @@ async function loadData(){
     const res = await api('GET','/api/data');
     if(res.data) applyData(res.data);
     else initDefaultData();
+    resetHistory();
     setStatus('Loaded from cloud.');
   } catch(e){
     initDefaultData();
@@ -491,7 +582,8 @@ function applyData(d){
 
 function initDefaultData(){
   S.docs=[]; S.asgn={}; S.leaves=[]; S.spec_blocks=[]; S.manual_asgns=[];
-  S.next_doc_id=1;
+  S.next_doc_id=1; S.next_leave_id=1; S.next_spec_block_id=1; S.next_manual_id=1;
+  resetHistory();
 }
 
 function serializeState(){
@@ -512,7 +604,7 @@ $('btn-load').onclick = async()=>{
   $('btn-load').disabled=true;
   try {
     const res=await api('GET','/api/data');
-    if(res.data){ applyData(res.data); renderAll(); toast('✓ Loaded from cloud'); }
+    if(res.data){ applyData(res.data); renderAll(); resetHistory(); toast('✓ Loaded from cloud'); }
     else toast('No cloud data found.',4000);
   } catch(e){ toast('Load failed: '+e.message,4000); }
   finally { $('btn-load').disabled=false; }
@@ -535,12 +627,13 @@ document.querySelectorAll('.tab').forEach(tab=>{
 });
 
 // ── Render all ─────────────────────────────────────────────────────
-function renderAll(){ updateMonthLabel(); renderDocList(); renderSchedule(); }
+function renderAll(){ updateMonthLabel(); renderDocList(); renderSchedule(); updateUndoRedoButtons(); }
 
 // ── Doctor list ────────────────────────────────────────────────────
 $('btn-add-doc').onclick=()=>{
   const name=$('doc-name').value.trim().toUpperCase();
   if(!name){ toast('Enter a name first.'); return; }
+  pushUndoState();
   const initials=$('doc-initials').value.trim().toUpperCase();
   const specLabel=$('doc-spec').value;
   let team='T'+(((S.docs.length)%3)+1);
@@ -567,7 +660,15 @@ function renderDocList(){
       <button class="doc-del" data-id="${ph.id}" title="Remove">✕</button>`;
     item.querySelector('.doc-del').onclick=e=>{
       e.stopPropagation();
-      if(confirm(`Remove ${ph.name}?`)){ S.docs=S.docs.filter(d=>d.id!==+e.target.dataset.id); renderAll(); }
+      if(confirm(`Remove ${ph.name}?`)){
+        pushUndoState();
+        const removeId=+e.target.dataset.id;
+        S.docs=S.docs.filter(d=>d.id!==removeId);
+        S.leaves=S.leaves.filter(x=>x.pid!==removeId);
+        S.manual_asgns=S.manual_asgns.filter(x=>x.pid!==removeId);
+        Object.keys(S.asgn).forEach(k=>{ if(k.startsWith(`${removeId}|`)) delete S.asgn[k]; });
+        renderAll();
+      }
     };
     list.appendChild(item);
   });
@@ -638,6 +739,7 @@ function openCellEdit(e){
 $('cell-ok').onclick=()=>{
   const {pid,day}=S.editing;
   const code=$('cell-code').value;
+  if(getAsgn(pid,day)!==code) pushUndoState();
   setAsgn(pid,day,code);
   $('cell-modal').style.display='none';
   renderSchedule();
@@ -647,6 +749,7 @@ $('cell-cancel').onclick=()=>{ $('cell-modal').style.display='none'; };
 // ── Auto-schedule ──────────────────────────────────────────────────
 $('btn-autoschedule').onclick=async()=>{
   if(S.docs.length<3){ toast('Need at least 3 physicians.',3000); return; }
+  pushUndoState();
   $('btn-autoschedule').disabled=true;
   $('btn-autoschedule').innerHTML='<span class="spinner"></span>Scheduling…';
   setStatus('Running auto-scheduler…');
@@ -660,17 +763,19 @@ $('btn-autoschedule').onclick=async()=>{
     renderSchedule();
     setStatus('Auto-schedule complete.');
     toast('✓ Schedule generated');
-  } catch(e){ toast('Schedule error: '+e.message,5000); setStatus('Schedule failed.'); }
+  } catch(e){ undoStack.pop(); updateUndoRedoButtons(); toast('Schedule error: '+e.message,5000); setStatus('Schedule failed.'); }
   finally { $('btn-autoschedule').disabled=false; $('btn-autoschedule').textContent='⚡ Auto-Schedule'; }
 };
 
 // ── Clear month ────────────────────────────────────────────────────
 $('btn-clear').onclick=()=>{
   if(!confirm('Clear all assignments for this month?')) return;
+  pushUndoState();
   const prefix=`|${S.yr}|${S.mo}|`;
   Object.keys(S.asgn).forEach(k=>{ if(k.includes(prefix)) delete S.asgn[k]; });
   S.manual_asgns=S.manual_asgns.filter(ma=>false); // clear all manual for simplicity
   renderSchedule();
+  updateUndoRedoButtons();
   toast('Month cleared.');
 };
 
@@ -682,8 +787,9 @@ $('leave-add-btn').onclick=()=>{
   const f=$('leave-from').value, t=$('leave-to').value;
   if(!pid||!f||!t){ $('leave-err').textContent='Fill all fields.'; return; }
   if(f>t){ $('leave-err').textContent='From must be ≤ To.'; return; }
+  pushUndoState();
   S.leaves.push({id:S.next_leave_id++,pid,f,t});
-  $('leave-err').textContent=''; renderLeaveList();
+  $('leave-err').textContent=''; renderLeaveList(); updateUndoRedoButtons();
 };
 function renderLeaveList(){
   const div=$('leave-list'); div.innerHTML='';
@@ -694,7 +800,8 @@ function renderLeaveList(){
       <span style="color:var(--muted);font-size:.78rem">${lb.f} → ${lb.t}</span>
       <button class="leave-del" data-id="${lb.id}">✕</button>`;
     item.querySelector('.leave-del').onclick=e=>{
-      S.leaves=S.leaves.filter(x=>x.id!==+e.target.dataset.id); renderLeaveList();
+      pushUndoState();
+      S.leaves=S.leaves.filter(x=>x.id!==+e.target.dataset.id); renderLeaveList(); updateUndoRedoButtons();
     };
     div.appendChild(item);
   });
@@ -708,8 +815,9 @@ $('block-add-btn').onclick=()=>{
   const f=$('block-from').value, t=$('block-to').value;
   if(!f||!t){ $('block-err').textContent='Fill all fields.'; return; }
   if(f>t){ $('block-err').textContent='From must be ≤ To.'; return; }
+  pushUndoState();
   S.spec_blocks.push({id:S.next_spec_block_id++,code,f,t});
-  $('block-err').textContent=''; renderBlockList();
+  $('block-err').textContent=''; renderBlockList(); updateUndoRedoButtons();
 };
 function renderBlockList(){
   const div=$('block-list'); div.innerHTML='';
@@ -719,7 +827,8 @@ function renderBlockList(){
       <span style="color:var(--muted);font-size:.78rem">${sb.f} → ${sb.t}</span>
       <button class="leave-del" data-id="${sb.id}">✕</button>`;
     item.querySelector('.leave-del').onclick=e=>{
-      S.spec_blocks=S.spec_blocks.filter(x=>x.id!==+e.target.dataset.id); renderBlockList();
+      pushUndoState();
+      S.spec_blocks=S.spec_blocks.filter(x=>x.id!==+e.target.dataset.id); renderBlockList(); updateUndoRedoButtons();
     };
     div.appendChild(item);
   });
@@ -736,9 +845,10 @@ $('manual-add-btn').onclick=()=>{
   if(!pid||!code||day<1||day>td){ $('manual-err').textContent='Invalid input.'; return; }
   const existing=getAsgn(pid,day);
   if(existing!=='_'&&existing!=='O'){ $('manual-err').textContent=`Day ${day} already assigned: ${existing}`; return; }
+  pushUndoState();
   S.manual_asgns.push({id:S.next_manual_id++,pid,code,day});
   setAsgn(pid,day,code);
-  $('manual-err').textContent=''; renderManualList(); renderSchedule();
+  $('manual-err').textContent=''; renderManualList(); renderSchedule(); updateUndoRedoButtons();
 };
 function renderManualList(){
   const div=$('manual-list'); div.innerHTML='';
@@ -750,11 +860,12 @@ function renderManualList(){
       <span style="color:var(--muted);font-size:.78rem">Day ${ma.day}</span>
       <button class="leave-del" data-id="${ma.id}">✕</button>`;
     item.querySelector('.leave-del').onclick=e=>{
+      pushUndoState();
       const id=+e.target.dataset.id;
       const m=S.manual_asgns.find(x=>x.id===id);
       if(m) setAsgn(m.pid,m.day,'_');
       S.manual_asgns=S.manual_asgns.filter(x=>x.id!==id);
-      renderManualList(); renderSchedule();
+      renderManualList(); renderSchedule(); updateUndoRedoButtons();
     };
     div.appendChild(item);
   });
@@ -819,6 +930,7 @@ $('import-file-input').onchange = e => {
   if(!file) return;
   const reader = new FileReader();
   reader.onload = ev => {
+    pushUndoState();
     const lines = ev.target.result.split(/\r?\n/);
     let added = 0, updated = 0, skipped = 0;
     lines.forEach(raw => {
@@ -849,6 +961,7 @@ $('import-file-input').onchange = e => {
       }
     });
     e.target.value = ''; // reset so same file can be re-imported
+    if(added===0 && updated===0) { undoStack.pop(); updateUndoRedoButtons(); }
     renderAll();
     toast(`✓ Import done: ${added} added, ${updated} updated, ${skipped} skipped`);
   };
@@ -859,6 +972,8 @@ $('import-file-input').onchange = e => {
 ['cell-modal','leave-modal','block-modal','manual-modal'].forEach(id=>{
   $(id).addEventListener('click',e=>{ if(e.target===$(id)) $(id).style.display='none'; });
 });
+
+updateUndoRedoButtons();
 </script>
 </body>
 </html>
