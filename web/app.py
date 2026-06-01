@@ -20,6 +20,7 @@ from flask import Flask, jsonify, request, send_file, render_template, abort
 from scheduler import (
     auto_schedule, compute_summary, dim, ds, day_of_week, is_we,
     Doctor, LeaveBlock, SpecialtyBlock, ManualAssignment,
+    ScheduleRules, DEFAULT_RULES,
     SHIFTS, COLOR_MAP, MONTHS, DN, TEAMS, SUBS, MORNING_K,
     DUTY_SET, OFF_SET, SPEC_OPTIONS, MANUAL_ASSIGN_CODES, BLOCKABLE_SPECIALTIES,
 )
@@ -148,6 +149,22 @@ def _manual_from(raw: List) -> List[ManualAssignment]:
     return [ManualAssignment(id=int(x["id"]),pid=int(x["pid"]),code=x["code"],day=int(x["day"]))
             for x in raw]
 
+def _rules_from(raw: Optional[Dict]) -> ScheduleRules:
+    """Parse a rules dict from the request body, falling back to defaults for missing keys."""
+    if not raw:
+        return ScheduleRules()
+    d = DEFAULT_RULES
+    return ScheduleRules(
+        max_consecutive_days = int(raw.get("max_consecutive_days", d.max_consecutive_days)),
+        post_call_days       = int(raw.get("post_call_days",       d.post_call_days)),
+        min_duties           = int(raw.get("min_duties",           d.min_duties)),
+        min_hours            = int(raw.get("min_hours",            d.min_hours)),
+        max_hours            = int(raw.get("max_hours",            d.max_hours)),
+        duty_shift_hours     = int(raw.get("duty_shift_hours",     d.duty_shift_hours)),
+        morning_shift_hours  = int(raw.get("morning_shift_hours",  d.morning_shift_hours)),
+        enforce_weekend_off  = bool(raw.get("enforce_weekend_off", d.enforce_weekend_off)),
+    )
+
 
 # ── Routes ────────────────────────────────────────────────────────────────────
 
@@ -172,6 +189,22 @@ def api_constants():
         "spec_options": SPEC_OPTIONS,
         "manual_codes": MANUAL_ASSIGN_CODES,
         "blockable":    BLOCKABLE_SPECIALTIES,
+    })
+
+
+@app.route("/api/rules/defaults")
+def api_rules_defaults():
+    """Return the default scheduling rules so the frontend can pre-populate the form."""
+    r = DEFAULT_RULES
+    return jsonify({
+        "max_consecutive_days": r.max_consecutive_days,
+        "post_call_days":       r.post_call_days,
+        "min_duties":           r.min_duties,
+        "min_hours":            r.min_hours,
+        "max_hours":            r.max_hours,
+        "duty_shift_hours":     r.duty_shift_hours,
+        "morning_shift_hours":  r.morning_shift_hours,
+        "enforce_weekend_off":  r.enforce_weekend_off,
     })
 
 
@@ -207,12 +240,13 @@ def api_schedule(token, user):
     leaves       = _leaves_from(body.get("leaves", []))
     spec_blocks  = _spec_blocks_from(body.get("spec_blocks", []))
     manual_asgns = _manual_from(body.get("manual_asgns", []))
+    rules        = _rules_from(body.get("rules"))
 
     # Stamp manual assignments into base asgn before scheduling
     for ma in manual_asgns:
         asgn[f"{ma.pid}|{yr}|{mo}|{ma.day}"] = ma.code
 
-    result = auto_schedule(docs, asgn, leaves, spec_blocks, yr, mo)
+    result = auto_schedule(docs, asgn, leaves, spec_blocks, yr, mo, rules=rules)
     if "err" in result:
         return jsonify({"error": result["err"]}), 400
 
@@ -226,12 +260,13 @@ def api_schedule(token, user):
 @app.route("/api/summary", methods=["POST"])
 @require_auth
 def api_summary(token, user):
-    body = request.get_json(force=True)
-    docs = _docs_from(body.get("docs", []))
-    asgn = body.get("asgn", {})
-    yr   = int(body["yr"])
-    mo   = int(body["mo"])
-    rows = compute_summary(docs, asgn, yr, mo)
+    body  = request.get_json(force=True)
+    docs  = _docs_from(body.get("docs", []))
+    asgn  = body.get("asgn", {})
+    yr    = int(body["yr"])
+    mo    = int(body["mo"])
+    rules = _rules_from(body.get("rules"))
+    rows  = compute_summary(docs, asgn, yr, mo, rules=rules)
     return jsonify({"rows": rows})
 
 

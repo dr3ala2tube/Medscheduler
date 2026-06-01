@@ -54,6 +54,28 @@ BLOCKABLE_SPECIALTIES = MORNING_K + ["DC"]
 
 
 @dataclass
+class ScheduleRules:
+    """User-configurable scheduling constraints.
+
+    All fields have defaults that reproduce the original hard-coded behaviour.
+    Pass a customised instance to auto_schedule() / compute_summary() to change
+    the rules without touching the engine logic.
+    """
+    max_consecutive_days: int = 6    # max working days in a row before forced off
+    post_call_days: int = 3          # number of PC (post-call) days after a duty shift
+    min_duties: int = 3              # minimum on-call shifts per physician per month
+    min_hours: int = 160             # minimum working hours per physician per month
+    max_hours: int = 168             # hard ceiling on working hours per month
+    duty_shift_hours: int = 16       # hours counted for each DM / DF shift
+    morning_shift_hours: int = 8     # hours counted for each 8-h morning shift
+    enforce_weekend_off: bool = True  # guarantee every physician at least one full weekend off
+
+
+# Module-level default – can be serialised to JSON for the frontend
+DEFAULT_RULES = ScheduleRules()
+
+
+@dataclass
 class Doctor:
     id: int
     name: str
@@ -113,7 +135,11 @@ def specialty_code_from_label(label: str) -> Optional[str]:
     return None
 
 
-def auto_schedule(docs, base_asgn, leaves, spec_blocks, y, m):
+def auto_schedule(docs, base_asgn, leaves, spec_blocks, y, m,
+                  rules: Optional[ScheduleRules] = None):
+    if rules is None:
+        rules = ScheduleRules()
+
     if len(docs) < 3:
         return {"err": "Need at least 3 physicians (one per IM team)."}
     td = dim(y, m)
@@ -129,7 +155,16 @@ def auto_schedule(docs, base_asgn, leaves, spec_blocks, y, m):
         return any(b.code == code and b.f <= cur <= b.t for b in spec_blocks)
 
     def calc_h(doc_id):
-        return sum(SHIFTS[get(doc_id, d)]["h"] for d in range(1, td+1))
+        total = 0
+        for d in range(1, td + 1):
+            code = get(doc_id, d)
+            h_base = SHIFTS[code]["h"]
+            if code in DUTY_SET:
+                total += rules.duty_shift_hours
+            elif h_base == 8:
+                total += rules.morning_shift_hours
+            # PC, O, L, R, _ contribute 0
+        return total
 
     def consecutive_working_days_before(pid, d):
         streak, x = 0, d - 1
@@ -192,11 +227,14 @@ def auto_schedule(docs, base_asgn, leaves, spec_blocks, y, m):
             sc = specialty_code_from_label(ph.spec)
             pref_spec[ph.id] = sc if sc and sc in MORNING_K else (ph.team if ph.team in TEAMS else TEAMS[i%3])
 
+    pc_range = range(1, rules.post_call_days + 1)
+
     def assign_duty(pid, d, side):
-        if consecutive_working_days_before(pid, d) >= 6: return False
-        if d > 1 and get(pid, d-1) in MORNING_K and calc_h(pid)+16 > 160: setv(pid, d-1, "O")
-        if calc_h(pid)+16 > 168: return False
-        for _pc in range(1, 4):
+        if consecutive_working_days_before(pid, d) >= rules.max_consecutive_days: return False
+        if d > 1 and get(pid, d-1) in MORNING_K and calc_h(pid) + rules.duty_shift_hours > rules.min_hours:
+            setv(pid, d-1, "O")
+        if calc_h(pid) + rules.duty_shift_hours > rules.max_hours: return False
+        for _pc in pc_range:
             _pd = d + _pc
             if _pd <= td:
                 if _pd in pinned.get(pid, set()): return False
@@ -205,7 +243,7 @@ def auto_schedule(docs, base_asgn, leaves, spec_blocks, y, m):
         duty_cnt[pid] += 1
         if side == "DM": male_side_cnt[pid] += 1
         unavail[pid].add(d)
-        for pc in range(1, 4):
+        for pc in pc_range:
             pd = d + pc
             if pd > td: break
             existing = get(pid, pd)
@@ -242,8 +280,10 @@ def auto_schedule(docs, base_asgn, leaves, spec_blocks, y, m):
         for d in wk["wdays"]:
             if any(get(ph.id,d)=="DC" for ph in docs if ph.id!=doc.id): continue
             if d not in hb[doc.id] and not is_spec_blocked("DC",d):
-                if consecutive_working_days_before(doc.id,d) >= 6: setv(doc.id,d,"O")
-                else: setv(doc.id,d,"DC")
+                if consecutive_working_days_before(doc.id,d) >= rules.max_consecutive_days:
+                    setv(doc.id,d,"O")
+                else:
+                    setv(doc.id,d,"DC")
                 unavail[doc.id].add(d)
         for d in wk["wends"]:
             if d not in hb[doc.id] and get(doc.id,d) == "_":
@@ -255,7 +295,7 @@ def auto_schedule(docs, base_asgn, leaves, spec_blocks, y, m):
         if not doc_id: continue
         for d in range(week_end+1, td+1):
             if is_wd(y,m,d) and d not in unavail[doc_id] and get(doc_id,d) == "_":
-                if consecutive_working_days_before(doc_id,d) >= 6: continue
+                if consecutive_working_days_before(doc_id,d) >= rules.max_consecutive_days: continue
                 side = "DM" if male_side_cnt[doc_id] <= (duty_cnt[doc_id]-male_side_cnt[doc_id]) else "DF"
                 assign_duty(doc_id, d, side); break
 
@@ -263,8 +303,11 @@ def auto_schedule(docs, base_asgn, leaves, spec_blocks, y, m):
     for _d in range(1, td+1):
         if not is_wd(y,m,_d) or is_spec_blocked("DC",_d): continue
         if any(get(ph.id,_d)=="DC" for ph in docs): continue
-        _dc_gap = [ph for ph in docs if get(ph.id,_d)=="_" and _d not in unavail[ph.id]
-                   and consecutive_working_days_before(ph.id,_d)<6 and calc_h(ph.id)+8<=168]
+        _dc_gap = [ph for ph in docs
+                   if get(ph.id,_d) == "_"
+                   and _d not in unavail[ph.id]
+                   and consecutive_working_days_before(ph.id,_d) < rules.max_consecutive_days
+                   and calc_h(ph.id) + rules.morning_shift_hours <= rules.max_hours]
         if _dc_gap:
             _dc_gap.sort(key=lambda ph:(dc_wk_cnt[ph.id],duty_cnt[ph.id],calc_h(ph.id),ph.id))
             setv(_dc_gap[0].id,_d,"DC"); unavail[_dc_gap[0].id].add(_d); dc_wk_cnt[_dc_gap[0].id]+=1
@@ -279,7 +322,7 @@ def auto_schedule(docs, base_asgn, leaves, spec_blocks, y, m):
             pairs.append({"d":d,"male":exist_dm.id,"female":exist_df.id}); continue
         avail = [(ph,duty_cnt[ph.id],calc_h(ph.id)) for ph in docs
                  if d not in unavail[ph.id] and get(ph.id,d)=="_"
-                 and consecutive_working_days_before(ph.id,d)<6]
+                 and consecutive_working_days_before(ph.id,d) < rules.max_consecutive_days]
         avail.sort(key=lambda x:(x[1],x[2],x[0].id))
         just_docs = [x[0] for x in avail]
         m_doc, f_doc = exist_dm, exist_df
@@ -303,33 +346,33 @@ def auto_schedule(docs, base_asgn, leaves, spec_blocks, y, m):
         for _side,_needed in (("DM",not any(get(ph.id,_d)=="DM" for ph in docs)),
                                ("DF",not any(get(ph.id,_d)=="DF" for ph in docs))):
             if not _needed: continue
-            _rescue = [ph for ph in docs if get(ph.id,_d) in MORNING_K or get(ph.id,_d)=="_"
-                       if consecutive_working_days_before(ph.id,_d)<6 and calc_h(ph.id)+16<=168
-                       if all((_d+pc>td or _d+pc not in pinned.get(ph.id,set()))
-                              and (_d+pc>td or get(ph.id,_d+pc)!="DC") for pc in range(1,4))]
+            _rescue = [ph for ph in docs
+                       if get(ph.id,_d) in MORNING_K or get(ph.id,_d) == "_"
+                       if consecutive_working_days_before(ph.id,_d) < rules.max_consecutive_days
+                       and calc_h(ph.id) + rules.duty_shift_hours <= rules.max_hours
+                       if all((_d+pc > td or _d+pc not in pinned.get(ph.id,set()))
+                              and (_d+pc > td or get(ph.id,_d+pc) != "DC")
+                              for pc in pc_range)]
             if _rescue:
                 _rescue.sort(key=lambda ph:(duty_cnt[ph.id],calc_h(ph.id),ph.id))
                 _rph=_rescue[0]
                 if get(_rph.id,_d) in MORNING_K: setv(_rph.id,_d,"_")
                 assign_duty(_rph.id,_d,_side)
 
-    # Phase 5.6 – minimum on-call guarantee (target: ≥ 3 per physician)
-    # Scans for physicians below the minimum and tries to assign additional
-    # duties without violating streak, hour, or pinned-day constraints.
-    MIN_DUTIES = 3
+    # Phase 5.6 – minimum on-call guarantee
     for ph in docs:
-        while duty_cnt[ph.id] < MIN_DUTIES:
+        while duty_cnt[ph.id] < rules.min_duties:
             placed = False
             for _d in range(1, td + 1):
                 cur = get(ph.id, _d)
                 if cur not in ("_",) and cur not in MORNING_K:
                     continue
-                if consecutive_working_days_before(ph.id, _d) >= 6:
+                if consecutive_working_days_before(ph.id, _d) >= rules.max_consecutive_days:
                     continue
-                if calc_h(ph.id) + 16 > 168:
-                    break  # no point scanning further days
+                if calc_h(ph.id) + rules.duty_shift_hours > rules.max_hours:
+                    break
                 _ok = True
-                for _pc in range(1, 4):
+                for _pc in pc_range:
                     _pd = _d + _pc
                     if _pd <= td:
                         if _pd in pinned.get(ph.id, set()): _ok = False; break
@@ -343,40 +386,33 @@ def auto_schedule(docs, base_asgn, leaves, spec_blocks, y, m):
                 else:
                     if cur in MORNING_K: setv(ph.id, _d, cur)  # restore on reject
             if not placed:
-                break  # cannot reach minimum without violating hard constraints
+                break
 
     # Phase 6 – happy weekend guarantee (Sat + Sun both off) + single-day fallback
-    wkends = [d for d in range(1,td+1) if is_we(y,m,d)]
-    # Build Sat+Sun pairs: Saturday=6, Sunday=0 in day_of_week()
-    we_pairs = []
-    for _d in range(1, td+1):
-        if day_of_week(y, m, _d) == 6 and _d+1 <= td and day_of_week(y, m, _d+1) == 0:
-            we_pairs.append((_d, _d+1))
-    for ph in docs:
-        # First pass: try to guarantee a full Sat+Sun happy weekend.
-        # IMPORTANT: blank ("_") slots are NOT confirmed off — Phase 7 will fill them
-        # with mornings. Only count confirmed OFF_SET codes here.
-        has_happy = any(
-            get(ph.id,sat) in OFF_SET and get(ph.id,sun) in OFF_SET
-            for sat,sun in we_pairs
-        )
-        if not has_happy:
-            # Try to protect a free Sat+Sun pair by stamping "O" BEFORE Phase 7 runs.
-            # Phase 7 will then see those days as off and assign coverage to others.
-            for sat,sun in we_pairs:
-                sc,uc = get(ph.id,sat), get(ph.id,sun)
-                # "Free" means not locked by duty/leave/DC; blank or existing morning can be cleared
-                sat_free = sc not in DUTY_SET and sc not in ("L","R","DC")
-                sun_free = uc not in DUTY_SET and uc not in ("L","R","DC")
-                if sat_free and sun_free:
-                    if sc not in OFF_SET: setv(ph.id, sat, "O")
-                    if uc not in OFF_SET: setv(ph.id, sun, "O")
-                    break
-        # Fallback: guarantee at least one single weekend day off (don't count "_" as off)
-        if not any(get(ph.id,d) in OFF_SET for d in wkends):
-            for w in wkends:
-                if get(ph.id,w) not in DUTY_SET and get(ph.id,w) not in ("L","R","DC"):
-                    setv(ph.id,w,"O"); break
+    if rules.enforce_weekend_off:
+        wkends = [d for d in range(1,td+1) if is_we(y,m,d)]
+        we_pairs = []
+        for _d in range(1, td+1):
+            if day_of_week(y, m, _d) == 6 and _d+1 <= td and day_of_week(y, m, _d+1) == 0:
+                we_pairs.append((_d, _d+1))
+        for ph in docs:
+            has_happy = any(
+                get(ph.id,sat) in OFF_SET and get(ph.id,sun) in OFF_SET
+                for sat,sun in we_pairs
+            )
+            if not has_happy:
+                for sat,sun in we_pairs:
+                    sc,uc = get(ph.id,sat), get(ph.id,sun)
+                    sat_free = sc not in DUTY_SET and sc not in ("L","R","DC")
+                    sun_free = uc not in DUTY_SET and uc not in ("L","R","DC")
+                    if sat_free and sun_free:
+                        if sc not in OFF_SET: setv(ph.id, sat, "O")
+                        if uc not in OFF_SET: setv(ph.id, sun, "O")
+                        break
+            if not any(get(ph.id,d) in OFF_SET for d in wkends):
+                for w in wkends:
+                    if get(ph.id,w) not in DUTY_SET and get(ph.id,w) not in ("L","R","DC"):
+                        setv(ph.id,w,"O"); break
 
     # Phase 7 – morning specialty fill
     spec_usage: Dict[str,int] = {code:0 for code in MORNING_K}
@@ -405,12 +441,13 @@ def auto_schedule(docs, base_asgn, leaves, spec_blocks, y, m):
         to_assign=[]; can_rest_early=[]
         for ph in docs:
             if get(ph.id,d)!="_": continue
-            if calc_h(ph.id)+8>168: setv(ph.id,d,"O"); continue
+            if calc_h(ph.id) + rules.morning_shift_hours > rules.max_hours:
+                setv(ph.id,d,"O"); continue
             backward=consecutive_working_days_before(ph.id,d)
-            if backward>=6: setv(ph.id,d,"O"); continue
+            if backward >= rules.max_consecutive_days: setv(ph.id,d,"O"); continue
             forward=preplaced_working_days_after(ph.id,d)
-            if backward+1+forward>6: setv(ph.id,d,"O"); continue
-            (can_rest_early if backward>=5 else to_assign).append(ph)
+            if backward+1+forward > rules.max_consecutive_days: setv(ph.id,d,"O"); continue
+            (can_rest_early if backward >= rules.max_consecutive_days - 1 else to_assign).append(ph)
 
         needed=len(SUBS)+len(TEAMS); shortfall=max(0,needed-len(to_assign))
         if shortfall>0 and can_rest_early:
@@ -484,24 +521,9 @@ def auto_schedule(docs, base_asgn, leaves, spec_blocks, y, m):
             _subs_pool.sort(key=lambda ph:(0 if pref_spec.get(ph.id)==_team else 1,-calc_h(ph.id),ph.id))
             _rph=_subs_pool[0]; setv(_rph.id,_d,_team); lock_map[_rph.id]=_team
 
-    # Phase 8 – Minimum hours enforcement (≥ 160 h per month)
-    #
-    # Hard rule: every physician must work at least 160 h per month.
-    # The only legitimate reasons to fall below 160 h are:
-    #   • Annual leave (L) – immovable, counts as zero working hours.
-    #   • Random off day (R) – immovable, counts as zero working hours.
-    #   • Manually assigned off day (O) that was pinned by the user.
-    #
-    # For any physician still below 160 h, plain "O" days that are not
-    # hard-blocked (L/R/FDD) and not user-pinned are converted into 8-hour
-    # morning shifts until the floor is reached or no eligible O days remain.
-    #
-    # Constraints respected:
-    #   • Hard 168 h ceiling is never exceeded.
-    #   • 6-consecutive-day limit is never violated.
-    #   • L, R, PC, and user-pinned days are never touched.
+    # Phase 8 – Minimum hours enforcement
     for ph in docs:
-        if calc_h(ph.id) >= 160:
+        if calc_h(ph.id) >= rules.min_hours:
             continue
         convertible = sorted(
             d for d in range(1, td + 1)
@@ -510,13 +532,13 @@ def auto_schedule(docs, base_asgn, leaves, spec_blocks, y, m):
             and d not in pinned[ph.id]
         )
         for d in convertible:
-            if calc_h(ph.id) >= 160:
+            if calc_h(ph.id) >= rules.min_hours:
                 break
-            if calc_h(ph.id) + 8 > 168:
+            if calc_h(ph.id) + rules.morning_shift_hours > rules.max_hours:
                 break
             streak_before = consecutive_working_days_before(ph.id, d)
             streak_after  = preplaced_working_days_after(ph.id, d)
-            if streak_before + 1 + streak_after > 6:
+            if streak_before + 1 + streak_after > rules.max_consecutive_days:
                 continue
             best_code = pref_spec.get(ph.id) or ph.team
             if best_code not in MORNING_K:
@@ -528,8 +550,10 @@ def auto_schedule(docs, base_asgn, leaves, spec_blocks, y, m):
     return {"a": a, "pairs": pairs}
 
 
-def compute_summary(docs, asgn, yr, mo):
+def compute_summary(docs, asgn, yr, mo, rules: Optional[ScheduleRules] = None):
     """Compute per-physician statistics for the given month."""
+    if rules is None:
+        rules = ScheduleRules()
     td = dim(yr, mo)
     rows = []
     for ph in docs:
@@ -538,9 +562,11 @@ def compute_summary(docs, asgn, yr, mo):
         we_off=0
         for d in range(1, td+1):
             code=get(d)
-            h=SHIFTS.get(code,{}).get("h",0)
-            if h==8:  h8+=8
-            if h==16: h16+=16; calls+=1
+            h_base=SHIFTS.get(code,{}).get("h",0)
+            if code in DUTY_SET:
+                h16 += rules.duty_shift_hours; calls += 1
+            elif h_base == 8:
+                h8 += rules.morning_shift_hours
             if code=="DC": daycare+=1
             if code=="PC": postcall+=1
             if code in ("O","R"): off+=1

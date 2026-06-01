@@ -44,6 +44,8 @@ header{background:var(--primary);color:#fff;display:flex;flex-direction:column;f
 #month-label{font-weight:700;font-size:.95rem;min-width:120px;text-align:center}
 .hdr-btn{background:rgba(255,255,255,.15);border:none;color:#fff;padding:5px 11px;border-radius:7px;font-size:.8rem;font-weight:600;cursor:pointer;white-space:nowrap;transition:background .15s;height:30px;display:flex;align-items:center;gap:4px}
 .hdr-btn:hover{background:rgba(255,255,255,.28)}
+.hdr-btn:disabled{opacity:.45;cursor:not-allowed}
+.hdr-btn:disabled:hover{background:rgba(255,255,255,.15)}
 .hdr-btn.danger{background:rgba(220,38,38,.5)}
 .hdr-btn.danger:hover{background:rgba(220,38,38,.8)}
 .hdr-sep{width:1px;height:22px;background:rgba(255,255,255,.25);margin:0 2px;flex-shrink:0}
@@ -138,6 +140,18 @@ table.summary .high{color:var(--danger);font-weight:700}
 .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#1a202c;color:#fff;padding:10px 20px;border-radius:8px;font-size:.87rem;z-index:9999;opacity:0;transition:opacity .3s;pointer-events:none}
 .toast.show{opacity:1}
 
+/* Rules modal */
+.rules-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px 16px}
+.rules-grid .rule-field{display:flex;flex-direction:column;gap:3px}
+.rules-grid .rule-field label{font-size:.75rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin:0}
+.rules-grid .rule-field input[type="number"]{width:100%;padding:6px 10px;border:1.5px solid var(--border);border-radius:6px;font-size:.88rem;outline:none}
+.rules-grid .rule-field input[type="number"]:focus{border-color:var(--primary)}
+.rules-grid .rule-field.full-width{grid-column:1/-1}
+.rule-toggle{display:flex;align-items:center;gap:10px;padding:8px 0}
+.rule-toggle input[type="checkbox"]{width:16px;height:16px;cursor:pointer;accent-color:var(--primary)}
+.rule-toggle span{font-size:.88rem;color:var(--text)}
+.rules-desc{font-size:.76rem;color:var(--muted);margin-top:1px}
+
 /* Status bar */
 .statusbar{padding:4px 14px;font-size:.77rem;color:var(--muted);background:var(--surface);border-top:1px solid var(--border);flex-shrink:0}
 
@@ -193,6 +207,10 @@ table.summary .high{color:var(--danger);font-weight:700}
       <button class="hdr-btn" id="btn-save">☁ Save</button>
       <button class="hdr-btn" id="btn-load">⬇ Load</button>
       <div class="hdr-sep"></div>
+      <button class="hdr-btn" id="undoBtn" type="button" disabled>↶ Undo</button>
+      <button class="hdr-btn" id="redoBtn" type="button" disabled>↷ Redo</button>
+      <div class="hdr-sep"></div>
+      <button class="hdr-btn" id="btn-rules">⚙ Rules</button>
       <button class="hdr-btn danger" id="btn-clear">🗑 Clear Month</button>
     </div>
   </header>
@@ -319,6 +337,65 @@ table.summary .high{color:var(--danger);font-weight:700}
   </div>
 </div>
 
+<!-- ── Rules Modal ─────────────────────────────────────────────── -->
+<div class="modal-overlay" id="rules-modal" style="display:none">
+  <div class="modal" style="max-width:520px">
+    <h2>⚙ Scheduling Rules</h2>
+    <p style="font-size:.82rem;color:var(--muted);margin-bottom:16px">
+      These rules apply when Auto-Schedule runs. Changes take effect on the next run and are saved with your schedule.
+    </p>
+    <div class="rules-grid">
+      <div class="rule-field">
+        <label>Max Consecutive Days</label>
+        <input type="number" id="rule-max-consecutive" min="1" max="14" step="1">
+        <span class="rules-desc">Days in a row before forced day off</span>
+      </div>
+      <div class="rule-field">
+        <label>Post-Call Off Days</label>
+        <input type="number" id="rule-post-call-days" min="1" max="7" step="1">
+        <span class="rules-desc">Recovery days after each duty shift</span>
+      </div>
+      <div class="rule-field">
+        <label>Min Duties / Physician</label>
+        <input type="number" id="rule-min-duties" min="0" max="20" step="1">
+        <span class="rules-desc">Minimum on-call shifts per month</span>
+      </div>
+      <div class="rule-field">
+        <label>Duty Shift Hours</label>
+        <input type="number" id="rule-duty-shift-hours" min="8" max="24" step="1">
+        <span class="rules-desc">Hours counted per DM / DF shift</span>
+      </div>
+      <div class="rule-field">
+        <label>Min Hours / Month</label>
+        <input type="number" id="rule-min-hours" min="0" max="300" step="8">
+        <span class="rules-desc">Floor — scheduler fills up to this</span>
+      </div>
+      <div class="rule-field">
+        <label>Max Hours / Month</label>
+        <input type="number" id="rule-max-hours" min="100" max="300" step="8">
+        <span class="rules-desc">Hard ceiling — never exceeded</span>
+      </div>
+      <div class="rule-field">
+        <label>Morning Shift Hours</label>
+        <input type="number" id="rule-morning-shift-hours" min="4" max="12" step="1">
+        <span class="rules-desc">Hours counted per morning / sub shift</span>
+      </div>
+      <div class="rule-field full-width">
+        <div class="rule-toggle">
+          <input type="checkbox" id="rule-enforce-weekend">
+          <span>Guarantee at least one full weekend off per physician</span>
+        </div>
+      </div>
+    </div>
+    <div class="modal-err" id="rules-err"></div>
+    <div class="modal-footer">
+      <button class="btn-cancel" id="rules-reset">Reset to Defaults</button>
+      <button class="btn-cancel" id="rules-cancel">Cancel</button>
+      <button class="btn-ok" id="rules-ok">Apply Rules</button>
+    </div>
+  </div>
+</div>
+
 <!-- ── Toast ───────────────────────────────────────────────────── -->
 <div class="toast" id="toast"></div>
 
@@ -334,16 +411,115 @@ const fbApp = firebase.initializeApp({
 });
 const auth = firebase.auth();
 
+// ── Default scheduling rules (mirrors ScheduleRules defaults in scheduler.py) ──
+const DEFAULT_RULES = {
+  max_consecutive_days: 6,
+  post_call_days:       3,
+  min_duties:           3,
+  min_hours:            160,
+  max_hours:            168,
+  duty_shift_hours:     16,
+  morning_shift_hours:  8,
+  enforce_weekend_off:  true,
+};
+
 // ── App state ──────────────────────────────────────────────────────
 const S = {
   yr: new Date().getFullYear(),
   mo: new Date().getMonth(),   // 0-indexed
   docs: [], asgn: {}, leaves: [], spec_blocks: [], manual_asgns: [],
   next_doc_id: 1, next_leave_id: 1, next_spec_block_id: 1, next_manual_id: 1,
+  rules: Object.assign({}, DEFAULT_RULES),  // user-configurable scheduling rules
   idToken: null,
   C: null,  // constants from server
   editing: null,  // {pid, day}
 };
+
+// ── Undo / Redo history ─────────────────────────────────────────────
+const HISTORY_LIMIT = 5;
+let undoStack = [];
+let redoStack = [];
+
+function deepClone(obj){
+  return JSON.parse(JSON.stringify(obj));
+}
+function captureHistoryState(){
+  return deepClone({
+    yr:S.yr, mo:S.mo,
+    docs:S.docs,
+    asgn:S.asgn,
+    leaves:S.leaves,
+    spec_blocks:S.spec_blocks,
+    manual_asgns:S.manual_asgns,
+    next_doc_id:S.next_doc_id,
+    next_leave_id:S.next_leave_id,
+    next_spec_block_id:S.next_spec_block_id,
+    next_manual_id:S.next_manual_id,
+    rules:S.rules,
+  });
+}
+function restoreHistoryState(state){
+  S.yr = state.yr;
+  S.mo = state.mo;
+  S.docs = deepClone(state.docs);
+  S.asgn = deepClone(state.asgn);
+  S.leaves = deepClone(state.leaves);
+  S.spec_blocks = deepClone(state.spec_blocks);
+  S.manual_asgns = deepClone(state.manual_asgns);
+  S.next_doc_id = state.next_doc_id;
+  S.next_leave_id = state.next_leave_id;
+  S.next_spec_block_id = state.next_spec_block_id;
+  S.next_manual_id = state.next_manual_id;
+  S.rules = deepClone(state.rules) || Object.assign({}, DEFAULT_RULES);
+  renderAll();
+  if(document.querySelector('.tab[data-tab="summary"]')?.classList.contains('active')) renderSummary();
+  updateUndoRedoButtons();
+}
+function pushUndoState(){
+  undoStack.push(captureHistoryState());
+  if(undoStack.length > HISTORY_LIMIT) undoStack = undoStack.slice(-HISTORY_LIMIT);
+  redoStack = [];
+  updateUndoRedoButtons();
+}
+function updateUndoRedoButtons(){
+  const undoBtn = $('undoBtn');
+  const redoBtn = $('redoBtn');
+  if(undoBtn) undoBtn.disabled = undoStack.length === 0;
+  if(redoBtn) redoBtn.disabled = redoStack.length === 0;
+}
+function resetHistory(){
+  undoStack = [];
+  redoStack = [];
+  updateUndoRedoButtons();
+}
+function undoAction(){
+  if(!undoStack.length){
+    setStatus('Nothing to undo.');
+    updateUndoRedoButtons();
+    return;
+  }
+  const current = captureHistoryState();
+  const prev = undoStack.pop();
+  redoStack.push(current);
+  if(redoStack.length > HISTORY_LIMIT) redoStack = redoStack.slice(-HISTORY_LIMIT);
+  restoreHistoryState(prev);
+  setStatus('Undo complete.');
+  toast('Undo complete.');
+}
+function redoAction(){
+  if(!redoStack.length){
+    setStatus('Nothing to redo.');
+    updateUndoRedoButtons();
+    return;
+  }
+  const current = captureHistoryState();
+  const next = redoStack.pop();
+  undoStack.push(current);
+  if(undoStack.length > HISTORY_LIMIT) undoStack = undoStack.slice(-HISTORY_LIMIT);
+  restoreHistoryState(next);
+  setStatus('Redo complete.');
+  toast('Redo complete.');
+}
 
 // ── Utility ────────────────────────────────────────────────────────
 const $  = id => document.getElementById(id);
@@ -431,6 +607,8 @@ auth.onAuthStateChanged(async user => {
 });
 
 $('btn-signout').onclick = ()=> auth.signOut();
+$('undoBtn').onclick = undoAction;
+$('redoBtn').onclick = redoAction;
 
 // ── Constants ──────────────────────────────────────────────────────
 async function loadConstants(){
@@ -471,6 +649,7 @@ async function loadData(){
     const res = await api('GET','/api/data');
     if(res.data) applyData(res.data);
     else initDefaultData();
+    resetHistory();
     setStatus('Loaded from cloud.');
   } catch(e){
     initDefaultData();
@@ -487,17 +666,24 @@ function applyData(d){
   S.leaves=(d.leaves||[]).map(x=>({...x,id:+x.id,pid:+x.pid}));
   S.spec_blocks=(d.spec_blocks||[]).map(x=>({...x,id:+x.id}));
   S.manual_asgns=(d.manual_asgns||[]).map(x=>({...x,id:+x.id,pid:+x.pid,day:+x.day}));
+  // Restore rules, falling back to defaults for any missing keys (backward compat)
+  S.rules = Object.assign({}, DEFAULT_RULES, d.rules||{});
+  // Ensure boolean type for enforce_weekend_off (Firestore may return as string)
+  S.rules.enforce_weekend_off = S.rules.enforce_weekend_off === true || S.rules.enforce_weekend_off === 'true';
 }
 
 function initDefaultData(){
   S.docs=[]; S.asgn={}; S.leaves=[]; S.spec_blocks=[]; S.manual_asgns=[];
-  S.next_doc_id=1;
+  S.next_doc_id=1; S.next_leave_id=1; S.next_spec_block_id=1; S.next_manual_id=1;
+  S.rules=Object.assign({}, DEFAULT_RULES);
+  resetHistory();
 }
 
 function serializeState(){
   return {yr:S.yr,mo:S.mo,next_doc_id:S.next_doc_id,next_leave_id:S.next_leave_id,
     next_spec_block_id:S.next_spec_block_id,next_manual_id:S.next_manual_id,
-    docs:S.docs,asgn:S.asgn,leaves:S.leaves,spec_blocks:S.spec_blocks,manual_asgns:S.manual_asgns};
+    docs:S.docs,asgn:S.asgn,leaves:S.leaves,spec_blocks:S.spec_blocks,
+    manual_asgns:S.manual_asgns,rules:S.rules};
 }
 
 $('btn-save').onclick = async()=>{
@@ -512,7 +698,7 @@ $('btn-load').onclick = async()=>{
   $('btn-load').disabled=true;
   try {
     const res=await api('GET','/api/data');
-    if(res.data){ applyData(res.data); renderAll(); toast('✓ Loaded from cloud'); }
+    if(res.data){ applyData(res.data); renderAll(); resetHistory(); toast('✓ Loaded from cloud'); }
     else toast('No cloud data found.',4000);
   } catch(e){ toast('Load failed: '+e.message,4000); }
   finally { $('btn-load').disabled=false; }
@@ -535,12 +721,13 @@ document.querySelectorAll('.tab').forEach(tab=>{
 });
 
 // ── Render all ─────────────────────────────────────────────────────
-function renderAll(){ updateMonthLabel(); renderDocList(); renderSchedule(); }
+function renderAll(){ updateMonthLabel(); renderDocList(); renderSchedule(); updateUndoRedoButtons(); }
 
 // ── Doctor list ────────────────────────────────────────────────────
 $('btn-add-doc').onclick=()=>{
   const name=$('doc-name').value.trim().toUpperCase();
   if(!name){ toast('Enter a name first.'); return; }
+  pushUndoState();
   const initials=$('doc-initials').value.trim().toUpperCase();
   const specLabel=$('doc-spec').value;
   let team='T'+(((S.docs.length)%3)+1);
@@ -567,7 +754,15 @@ function renderDocList(){
       <button class="doc-del" data-id="${ph.id}" title="Remove">✕</button>`;
     item.querySelector('.doc-del').onclick=e=>{
       e.stopPropagation();
-      if(confirm(`Remove ${ph.name}?`)){ S.docs=S.docs.filter(d=>d.id!==+e.target.dataset.id); renderAll(); }
+      if(confirm(`Remove ${ph.name}?`)){
+        pushUndoState();
+        const removeId=+e.target.dataset.id;
+        S.docs=S.docs.filter(d=>d.id!==removeId);
+        S.leaves=S.leaves.filter(x=>x.pid!==removeId);
+        S.manual_asgns=S.manual_asgns.filter(x=>x.pid!==removeId);
+        Object.keys(S.asgn).forEach(k=>{ if(k.startsWith(`${removeId}|`)) delete S.asgn[k]; });
+        renderAll();
+      }
     };
     list.appendChild(item);
   });
@@ -638,6 +833,7 @@ function openCellEdit(e){
 $('cell-ok').onclick=()=>{
   const {pid,day}=S.editing;
   const code=$('cell-code').value;
+  if(getAsgn(pid,day)!==code) pushUndoState();
   setAsgn(pid,day,code);
   $('cell-modal').style.display='none';
   renderSchedule();
@@ -647,6 +843,7 @@ $('cell-cancel').onclick=()=>{ $('cell-modal').style.display='none'; };
 // ── Auto-schedule ──────────────────────────────────────────────────
 $('btn-autoschedule').onclick=async()=>{
   if(S.docs.length<3){ toast('Need at least 3 physicians.',3000); return; }
+  pushUndoState();
   $('btn-autoschedule').disabled=true;
   $('btn-autoschedule').innerHTML='<span class="spinner"></span>Scheduling…';
   setStatus('Running auto-scheduler…');
@@ -654,23 +851,26 @@ $('btn-autoschedule').onclick=async()=>{
     const res=await api('POST','/api/schedule',{
       docs:S.docs,asgn:S.asgn,yr:S.yr,mo:S.mo,
       leaves:S.leaves,spec_blocks:S.spec_blocks,manual_asgns:S.manual_asgns,
+      rules:S.rules,
     });
     // Merge new assignments into S.asgn
     Object.assign(S.asgn, res.asgn);
     renderSchedule();
     setStatus('Auto-schedule complete.');
     toast('✓ Schedule generated');
-  } catch(e){ toast('Schedule error: '+e.message,5000); setStatus('Schedule failed.'); }
+  } catch(e){ undoStack.pop(); updateUndoRedoButtons(); toast('Schedule error: '+e.message,5000); setStatus('Schedule failed.'); }
   finally { $('btn-autoschedule').disabled=false; $('btn-autoschedule').textContent='⚡ Auto-Schedule'; }
 };
 
 // ── Clear month ────────────────────────────────────────────────────
 $('btn-clear').onclick=()=>{
   if(!confirm('Clear all assignments for this month?')) return;
+  pushUndoState();
   const prefix=`|${S.yr}|${S.mo}|`;
   Object.keys(S.asgn).forEach(k=>{ if(k.includes(prefix)) delete S.asgn[k]; });
   S.manual_asgns=S.manual_asgns.filter(ma=>false); // clear all manual for simplicity
   renderSchedule();
+  updateUndoRedoButtons();
   toast('Month cleared.');
 };
 
@@ -682,8 +882,9 @@ $('leave-add-btn').onclick=()=>{
   const f=$('leave-from').value, t=$('leave-to').value;
   if(!pid||!f||!t){ $('leave-err').textContent='Fill all fields.'; return; }
   if(f>t){ $('leave-err').textContent='From must be ≤ To.'; return; }
+  pushUndoState();
   S.leaves.push({id:S.next_leave_id++,pid,f,t});
-  $('leave-err').textContent=''; renderLeaveList();
+  $('leave-err').textContent=''; renderLeaveList(); updateUndoRedoButtons();
 };
 function renderLeaveList(){
   const div=$('leave-list'); div.innerHTML='';
@@ -694,7 +895,8 @@ function renderLeaveList(){
       <span style="color:var(--muted);font-size:.78rem">${lb.f} → ${lb.t}</span>
       <button class="leave-del" data-id="${lb.id}">✕</button>`;
     item.querySelector('.leave-del').onclick=e=>{
-      S.leaves=S.leaves.filter(x=>x.id!==+e.target.dataset.id); renderLeaveList();
+      pushUndoState();
+      S.leaves=S.leaves.filter(x=>x.id!==+e.target.dataset.id); renderLeaveList(); updateUndoRedoButtons();
     };
     div.appendChild(item);
   });
@@ -708,8 +910,9 @@ $('block-add-btn').onclick=()=>{
   const f=$('block-from').value, t=$('block-to').value;
   if(!f||!t){ $('block-err').textContent='Fill all fields.'; return; }
   if(f>t){ $('block-err').textContent='From must be ≤ To.'; return; }
+  pushUndoState();
   S.spec_blocks.push({id:S.next_spec_block_id++,code,f,t});
-  $('block-err').textContent=''; renderBlockList();
+  $('block-err').textContent=''; renderBlockList(); updateUndoRedoButtons();
 };
 function renderBlockList(){
   const div=$('block-list'); div.innerHTML='';
@@ -719,7 +922,8 @@ function renderBlockList(){
       <span style="color:var(--muted);font-size:.78rem">${sb.f} → ${sb.t}</span>
       <button class="leave-del" data-id="${sb.id}">✕</button>`;
     item.querySelector('.leave-del').onclick=e=>{
-      S.spec_blocks=S.spec_blocks.filter(x=>x.id!==+e.target.dataset.id); renderBlockList();
+      pushUndoState();
+      S.spec_blocks=S.spec_blocks.filter(x=>x.id!==+e.target.dataset.id); renderBlockList(); updateUndoRedoButtons();
     };
     div.appendChild(item);
   });
@@ -736,9 +940,10 @@ $('manual-add-btn').onclick=()=>{
   if(!pid||!code||day<1||day>td){ $('manual-err').textContent='Invalid input.'; return; }
   const existing=getAsgn(pid,day);
   if(existing!=='_'&&existing!=='O'){ $('manual-err').textContent=`Day ${day} already assigned: ${existing}`; return; }
+  pushUndoState();
   S.manual_asgns.push({id:S.next_manual_id++,pid,code,day});
   setAsgn(pid,day,code);
-  $('manual-err').textContent=''; renderManualList(); renderSchedule();
+  $('manual-err').textContent=''; renderManualList(); renderSchedule(); updateUndoRedoButtons();
 };
 function renderManualList(){
   const div=$('manual-list'); div.innerHTML='';
@@ -750,11 +955,12 @@ function renderManualList(){
       <span style="color:var(--muted);font-size:.78rem">Day ${ma.day}</span>
       <button class="leave-del" data-id="${ma.id}">✕</button>`;
     item.querySelector('.leave-del').onclick=e=>{
+      pushUndoState();
       const id=+e.target.dataset.id;
       const m=S.manual_asgns.find(x=>x.id===id);
       if(m) setAsgn(m.pid,m.day,'_');
       S.manual_asgns=S.manual_asgns.filter(x=>x.id!==id);
-      renderManualList(); renderSchedule();
+      renderManualList(); renderSchedule(); updateUndoRedoButtons();
     };
     div.appendChild(item);
   });
@@ -764,7 +970,7 @@ function renderManualList(){
 async function renderSummary(){
   if(!S.docs.length) return;
   try {
-    const res=await api('POST','/api/summary',{docs:S.docs,asgn:S.asgn,yr:S.yr,mo:S.mo});
+    const res=await api('POST','/api/summary',{docs:S.docs,asgn:S.asgn,yr:S.yr,mo:S.mo,rules:S.rules});
     const cols=['name','team','total','calls','daycare','postcall','off','leave','weekend_off'];
     const labels=['Physician','Team','Total Hrs','On-Calls','Daycare','Post-Call','Off','Leave','Weekend Off'];
     const thead=$('summary-head'), tbody=$('summary-body');
@@ -819,6 +1025,7 @@ $('import-file-input').onchange = e => {
   if(!file) return;
   const reader = new FileReader();
   reader.onload = ev => {
+    pushUndoState();
     const lines = ev.target.result.split(/\r?\n/);
     let added = 0, updated = 0, skipped = 0;
     lines.forEach(raw => {
@@ -849,16 +1056,70 @@ $('import-file-input').onchange = e => {
       }
     });
     e.target.value = ''; // reset so same file can be re-imported
+    if(added===0 && updated===0) { undoStack.pop(); updateUndoRedoButtons(); }
     renderAll();
     toast(`✓ Import done: ${added} added, ${updated} updated, ${skipped} skipped`);
   };
   reader.readAsText(file);
 };
 
+// ── Rules modal ───────────────────────────────────────────────────
+function openRulesModal(){
+  const r = S.rules;
+  $('rule-max-consecutive').value    = r.max_consecutive_days;
+  $('rule-post-call-days').value     = r.post_call_days;
+  $('rule-min-duties').value         = r.min_duties;
+  $('rule-min-hours').value          = r.min_hours;
+  $('rule-max-hours').value          = r.max_hours;
+  $('rule-duty-shift-hours').value   = r.duty_shift_hours;
+  $('rule-morning-shift-hours').value= r.morning_shift_hours;
+  $('rule-enforce-weekend').checked  = r.enforce_weekend_off;
+  $('rules-err').textContent = '';
+  $('rules-modal').style.display = 'flex';
+}
+
+function applyRules(){
+  const minH   = +$('rule-min-hours').value;
+  const maxH   = +$('rule-max-hours').value;
+  const maxCon = +$('rule-max-consecutive').value;
+  const pcDays = +$('rule-post-call-days').value;
+  if(maxH <= minH){
+    $('rules-err').textContent = 'Max hours must be greater than min hours.'; return;
+  }
+  if(maxCon < 1){ $('rules-err').textContent = 'Max consecutive days must be ≥ 1.'; return; }
+  if(pcDays < 1){ $('rules-err').textContent = 'Post-call days must be ≥ 1.'; return; }
+  S.rules = {
+    max_consecutive_days: maxCon,
+    post_call_days:       pcDays,
+    min_duties:           +$('rule-min-duties').value,
+    min_hours:            minH,
+    max_hours:            maxH,
+    duty_shift_hours:     +$('rule-duty-shift-hours').value,
+    morning_shift_hours:  +$('rule-morning-shift-hours').value,
+    enforce_weekend_off:  $('rule-enforce-weekend').checked,
+  };
+  $('rules-modal').style.display = 'none';
+  toast('✓ Rules updated — run Auto-Schedule to apply');
+}
+
+function resetRulesToDefaults(){
+  S.rules = Object.assign({}, DEFAULT_RULES);
+  openRulesModal(); // re-populate fields with defaults
+  $('rules-err').textContent = '';
+  toast('Rules reset to defaults');
+}
+
+$('btn-rules').onclick    = openRulesModal;
+$('rules-ok').onclick     = applyRules;
+$('rules-cancel').onclick = ()=>{ $('rules-modal').style.display='none'; };
+$('rules-reset').onclick  = resetRulesToDefaults;
+
 // ── Close modals on overlay click ─────────────────────────────────
-['cell-modal','leave-modal','block-modal','manual-modal'].forEach(id=>{
+['cell-modal','leave-modal','block-modal','manual-modal','rules-modal'].forEach(id=>{
   $(id).addEventListener('click',e=>{ if(e.target===$(id)) $(id).style.display='none'; });
 });
+
+updateUndoRedoButtons();
 </script>
 </body>
 </html>

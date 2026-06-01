@@ -13,6 +13,7 @@ from openpyxl.styles import Font, PatternFill, Alignment
 from openpyxl.utils import get_column_letter
 from typing import Dict, List, Optional
 import threading
+import copy
 
 try:
     from firebase_service import firebase, FirebaseAuthError, FirebaseNetworkError
@@ -1240,6 +1241,7 @@ class ManualAssignDialog(tk.Toplevel):
             return
 
         # Save: stamp grid + store ManualAssignment record
+        self.parent._push_undo_state()
         self.parent.setv(pid, day, code)
         ma = ManualAssignment(
             id=self.parent.next_manual_id,
@@ -1270,6 +1272,7 @@ class ManualAssignDialog(tk.Toplevel):
         ma = next((x for x in self.parent.manual_asgns if x.id == ma_id), None)
         if ma is None:
             return
+        self.parent._push_undo_state()
         # Erase from grid only if it still matches what we placed
         current = self.parent.get(ma.pid, ma.day)
         if current == ma.code:
@@ -1866,6 +1869,9 @@ class MedSchedulerApp(tk.Tk):
         self.leaves: List[LeaveBlock] = []
         self.spec_blocks: List[SpecialtyBlock] = []
         self.manual_asgns: List[ManualAssignment] = []   # user-pinned assignments
+        self._undo_stack: List[dict] = []
+        self._redo_stack: List[dict] = []
+        self._history_limit = 5
         self.status_var = tk.StringVar(value="Ready")
         self.build_ui()
         self.refresh_all()
@@ -1879,6 +1885,71 @@ class MedSchedulerApp(tk.Tk):
 
     def setv(self, pid: int, d: int, value: str) -> None:
         self.asgn[self.ak(pid, d)] = value
+
+    def _capture_history_state(self) -> dict:
+        return {
+            "docs": copy.deepcopy(self.docs),
+            "asgn": dict(self.asgn),
+            "leaves": copy.deepcopy(self.leaves),
+            "spec_blocks": copy.deepcopy(self.spec_blocks),
+            "manual_asgns": copy.deepcopy(self.manual_asgns),
+            "next_doc_id": self.next_doc_id,
+            "next_leave_id": self.next_leave_id,
+            "next_spec_block_id": self.next_spec_block_id,
+            "next_manual_id": self.next_manual_id,
+        }
+
+    def _restore_history_state(self, state: dict) -> None:
+        self.docs = copy.deepcopy(state["docs"])
+        self.asgn = dict(state["asgn"])
+        self.leaves = copy.deepcopy(state["leaves"])
+        self.spec_blocks = copy.deepcopy(state["spec_blocks"])
+        self.manual_asgns = copy.deepcopy(state["manual_asgns"])
+        self.next_doc_id = state["next_doc_id"]
+        self.next_leave_id = state["next_leave_id"]
+        self.next_spec_block_id = state["next_spec_block_id"]
+        self.next_manual_id = state["next_manual_id"]
+        self.refresh_all()
+        self._update_undo_redo_buttons()
+
+    def _push_undo_state(self) -> None:
+        self._undo_stack.append(self._capture_history_state())
+        if len(self._undo_stack) > self._history_limit:
+            self._undo_stack = self._undo_stack[-self._history_limit:]
+        self._redo_stack.clear()
+        self._update_undo_redo_buttons()
+
+    def _update_undo_redo_buttons(self) -> None:
+        if hasattr(self, "undo_btn"):
+            self.undo_btn.configure(state=("normal" if self._undo_stack else "disabled"))
+        if hasattr(self, "redo_btn"):
+            self.redo_btn.configure(state=("normal" if self._redo_stack else "disabled"))
+
+    def undo_action(self):
+        if not self._undo_stack:
+            self.status_var.set("Nothing to undo.")
+            self._update_undo_redo_buttons()
+            return
+        current = self._capture_history_state()
+        state = self._undo_stack.pop()
+        self._redo_stack.append(current)
+        if len(self._redo_stack) > self._history_limit:
+            self._redo_stack = self._redo_stack[-self._history_limit:]
+        self._restore_history_state(state)
+        self.status_var.set("Undo complete.")
+
+    def redo_action(self):
+        if not self._redo_stack:
+            self.status_var.set("Nothing to redo.")
+            self._update_undo_redo_buttons()
+            return
+        current = self._capture_history_state()
+        state = self._redo_stack.pop()
+        self._undo_stack.append(current)
+        if len(self._undo_stack) > self._history_limit:
+            self._undo_stack = self._undo_stack[-self._history_limit:]
+        self._restore_history_state(state)
+        self.status_var.set("Redo complete.")
 
     def build_ui(self):
         # Status bar — packed first so it anchors to the bottom correctly
@@ -1943,6 +2014,12 @@ class MedSchedulerApp(tk.Tk):
         ttk.Separator(tb2, orient="vertical").pack(
             side="left", fill="y", padx=8, pady=3)
 
+        self.undo_btn = ttk.Button(tb2, text="Undo",
+                                   command=self.undo_action, state="disabled")
+        self.undo_btn.pack(side="left", padx=2)
+        self.redo_btn = ttk.Button(tb2, text="Redo",
+                                   command=self.redo_action, state="disabled")
+        self.redo_btn.pack(side="left", padx=2)
         ttk.Button(tb2, text="Clear Month",
                    command=self.clear_month).pack(side="left", padx=2)
 
@@ -2406,6 +2483,7 @@ class MedSchedulerApp(tk.Tk):
             return
         code = self._qa_codes[idx]
 
+        self._push_undo_state()
         self.setv(pid, day, code)
         self.refresh_schedule()
         self.refresh_summary()
@@ -2707,6 +2785,7 @@ class MedSchedulerApp(tk.Tk):
         name = self.name_var.get().strip()
         if not name:
             return
+        self._push_undo_state()
         spec     = self.spec_var.get().strip() or "Internal Medicine"
         initials = self.initials_var.get().strip().upper()
         team     = TEAMS[len(self.docs) % 3]
@@ -2738,6 +2817,7 @@ class MedSchedulerApp(tk.Tk):
                + "\n\nThis will also delete their assignments and leave blocks.")
         if not messagebox.askyesno("Remove physicians", msg):
             return
+        self._push_undo_state()
         self.docs        = [d for d in self.docs if d.id not in to_remove]
         self.leaves      = [b for b in self.leaves if b.pid not in to_remove]
         self.manual_asgns = [ma for ma in self.manual_asgns if ma.pid not in to_remove]
@@ -2767,6 +2847,7 @@ class MedSchedulerApp(tk.Tk):
         if new_spec == doctor.spec:
             self.status_var.set(f"{doctor.name} is already assigned to '{new_spec}' – no change.")
             return
+        self._push_undo_state()
         old_spec = doctor.spec
         doctor.spec = new_spec
         # If the new specialty is one of the team morning slots, sync ph.team too
@@ -2796,6 +2877,7 @@ class MedSchedulerApp(tk.Tk):
         ManualAssignDialog(self)
 
     def add_leave(self, pid: int, f: str, t: str):
+        self._push_undo_state()
         self.leaves.append(LeaveBlock(self.next_leave_id, pid, f, t))
         self.next_leave_id += 1
         for d in range(1, dim(self.yr, self.mo) + 1):
@@ -2808,6 +2890,7 @@ class MedSchedulerApp(tk.Tk):
         block = next((x for x in self.leaves if x.id == leave_id), None)
         if not block:
             return
+        self._push_undo_state()
         self.leaves = [x for x in self.leaves if x.id != leave_id]
         for d in range(1, dim(self.yr, self.mo) + 1):
             cur = ds(self.yr, self.mo, d)
@@ -2816,11 +2899,13 @@ class MedSchedulerApp(tk.Tk):
         self.refresh_all()
 
     def add_spec_block(self, code: str, f: str, t: str):
+        self._push_undo_state()
         self.spec_blocks.append(SpecialtyBlock(self.next_spec_block_id, code, f, t))
         self.next_spec_block_id += 1
         self.status_var.set(f"Blocked {SHIFTS[code]['label']} from {f} to {t}.")
 
     def delete_spec_block(self, block_id: int):
+        self._push_undo_state()
         self.spec_blocks = [b for b in self.spec_blocks if b.id != block_id]
         self.status_var.set("Specialty block removed.")
 
@@ -2829,6 +2914,7 @@ class MedSchedulerApp(tk.Tk):
                                    "Remove all assignments for the current month?\n"
                                    "(Manual assignments for this month will also be cleared.)"):
             return
+        self._push_undo_state()
         marker = f"|{self.yr}|{self.mo}|"
         self.asgn = {k: v for k, v in self.asgn.items() if marker not in k}
         # Clear manual assignments for this month
@@ -2854,9 +2940,13 @@ class MedSchedulerApp(tk.Tk):
         for ma in self.manual_asgns:
             self.setv(ma.pid, ma.day, ma.code)
 
+        self._push_undo_state()
         base = dict(self.asgn)
         res = auto_schedule(self.docs, base, self.leaves, self.spec_blocks, self.yr, self.mo)
         if "err" in res:
+            if self._undo_stack:
+                self._undo_stack.pop()
+            self._update_undo_redo_buttons()
             messagebox.showerror("Auto-schedule", res["err"])
             return
         self.asgn = res["a"]
