@@ -158,6 +158,43 @@ table.summary .high{color:var(--danger);font-weight:700}
 /* Spinner */
 .spinner{display:inline-block;width:16px;height:16px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin .6s linear infinite;vertical-align:middle;margin-right:5px}
 @keyframes spin{to{transform:rotate(360deg)}}
+
+/* Shifts config modal */
+.shifts-tabs{display:flex;border-bottom:2px solid var(--border);margin-bottom:14px}
+.shifts-tab{padding:7px 16px;font-size:.83rem;font-weight:600;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-2px}
+.shifts-tab.active{color:var(--primary);border-bottom-color:var(--primary)}
+.shifts-section{display:none}
+.shifts-section.active{display:block}
+.shifts-list{margin-bottom:10px;max-height:180px;overflow-y:auto}
+.shift-row{display:grid;grid-template-columns:60px 1fr 70px 28px 28px;gap:6px;align-items:center;padding:4px 0;border-bottom:1px solid var(--border)}
+.shift-row:last-child{border-bottom:none}
+.shift-row input{padding:4px 7px;border:1.5px solid var(--border);border-radius:5px;font-size:.8rem;outline:none;width:100%}
+.shift-row input:focus{border-color:var(--primary)}
+.shift-row input[readonly]{background:var(--bg);color:var(--muted);cursor:default}
+.shift-row-code{font-weight:700;font-size:.82rem;color:var(--text);padding:4px 7px;background:var(--bg);border-radius:5px;text-align:center}
+.shift-color-swatch{width:24px;height:24px;border-radius:4px;border:2px solid var(--border);cursor:pointer;flex-shrink:0;position:relative}
+.shift-color-swatch:hover{border-color:var(--primary)}
+.color-picker-popup{display:none;position:absolute;top:28px;left:0;background:#fff;border:1px solid var(--border);border-radius:8px;padding:8px;box-shadow:0 4px 16px rgba(0,0,0,.15);z-index:600;width:180px}
+.color-picker-popup.open{display:grid;grid-template-columns:repeat(6,1fr);gap:5px}
+.color-swatch-opt{width:22px;height:22px;border-radius:4px;cursor:pointer;border:2px solid transparent}
+.color-swatch-opt:hover{border-color:var(--primary);transform:scale(1.1)}
+.shift-del-btn{background:none;border:none;color:var(--muted);cursor:pointer;font-size:.9rem;padding:2px 4px;border-radius:4px}
+.shift-del-btn:hover{color:var(--danger);background:#fee2e2}
+.clinic-enabled-chk{width:16px;height:16px;cursor:pointer;accent-color:var(--primary);justify-self:center}
+.shifts-add-form{background:var(--bg);border-radius:8px;padding:10px;margin-top:6px}
+.shifts-add-form h4{font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-bottom:8px}
+.shifts-add-row{display:grid;gap:6px;align-items:end;margin-bottom:6px}
+.shifts-add-row.row4{grid-template-columns:70px 1fr 70px 28px}
+.shifts-add-row.row5{grid-template-columns:70px 1fr 70px 52px 28px}
+.shifts-add-row label{font-size:.73rem;font-weight:600;color:var(--muted);text-transform:uppercase;display:block;margin-bottom:2px}
+.shifts-add-row input{padding:5px 8px;border:1.5px solid var(--border);border-radius:5px;font-size:.82rem;outline:none;width:100%}
+.shifts-add-row input:focus{border-color:var(--primary)}
+.btn-shift-add{background:var(--primary);color:#fff;border:none;border-radius:6px;padding:6px 10px;font-size:.8rem;font-weight:600;cursor:pointer;white-space:nowrap}
+.btn-shift-add:hover{background:var(--primary-dark)}
+.dc-edit-row{display:grid;grid-template-columns:60px 1fr 70px 28px;gap:6px;align-items:center;padding:6px 0;font-size:.82rem}
+.dc-edit-row label{font-size:.73rem;font-weight:600;color:var(--muted);text-transform:uppercase;margin-bottom:2px}
+.dc-edit-row input{padding:4px 7px;border:1.5px solid var(--border);border-radius:5px;font-size:.8rem;outline:none;width:100%}
+.dc-note{font-size:.76rem;color:var(--muted);margin-top:6px}
 </style>
 </head>
 <body>
@@ -210,6 +247,7 @@ table.summary .high{color:var(--danger);font-weight:700}
       <button class="hdr-btn" id="undoBtn" type="button" disabled>↶ Undo</button>
       <button class="hdr-btn" id="redoBtn" type="button" disabled>↷ Redo</button>
       <div class="hdr-sep"></div>
+      <button class="hdr-btn" id="btn-shifts">🔧 Shifts</button>
       <button class="hdr-btn" id="btn-rules">⚙ Rules</button>
       <button class="hdr-btn danger" id="btn-clear">🗑 Clear Month</button>
     </div>
@@ -337,6 +375,95 @@ table.summary .high{color:var(--danger);font-weight:700}
   </div>
 </div>
 
+<!-- ── Shifts Config Modal ─────────────────────────────────────────── -->
+<div class="modal-overlay" id="shifts-modal" style="display:none">
+  <div class="modal" style="max-width:560px">
+    <h2>🔧 Teams &amp; Specialties</h2>
+    <p style="font-size:.82rem;color:var(--muted);margin-bottom:12px">
+      Changes apply on the next Auto-Schedule run and are saved with your schedule.
+      Shift codes cannot be changed after creation.
+    </p>
+    <div class="shifts-tabs">
+      <div class="shifts-tab active" data-stab="teams">Teams</div>
+      <div class="shifts-tab" data-stab="specialties">Specialties</div>
+      <div class="shifts-tab" data-stab="duties">Duty Shifts</div>
+      <div class="shifts-tab" data-stab="clinics">Clinics</div>
+    </div>
+
+    <!-- Teams section -->
+    <div class="shifts-section active" id="stab-teams">
+      <div class="shifts-list" id="shifts-teams-list"></div>
+      <div class="shifts-add-form">
+        <h4>Add Team</h4>
+        <div class="shifts-add-row row4">
+          <div><label>Code</label><input id="add-team-code" maxlength="6" placeholder="T4" style="text-transform:uppercase"></div>
+          <div><label>Label</label><input id="add-team-label" placeholder="Team 4 Morning"></div>
+          <div><label>Short</label><input id="add-team-short" maxlength="8" placeholder="T4"></div>
+          <div style="padding-top:18px"><div class="shift-color-swatch" id="add-team-color-swatch" style="background:#DBEAFE" data-color="DBEAFE"><div class="color-picker-popup" id="add-team-color-popup"></div></div></div>
+        </div>
+        <button class="btn-shift-add" id="btn-add-team">+ Add Team</button>
+      </div>
+      <p style="font-size:.76rem;color:var(--muted);margin-top:6px">Minimum 3 teams required.</p>
+    </div>
+
+    <!-- Specialties section -->
+    <div class="shifts-section" id="stab-specialties">
+      <div class="shifts-list" id="shifts-specs-list"></div>
+      <div class="shifts-add-form">
+        <h4>Add Specialty</h4>
+        <div class="shifts-add-row row4">
+          <div><label>Code</label><input id="add-spec-code" maxlength="6" placeholder="HM" style="text-transform:uppercase"></div>
+          <div><label>Label</label><input id="add-spec-label" placeholder="Hematology"></div>
+          <div><label>Short</label><input id="add-spec-short" maxlength="8" placeholder="HM"></div>
+          <div style="padding-top:18px"><div class="shift-color-swatch" id="add-spec-color-swatch" style="background:#FFE4E6" data-color="FFE4E6"><div class="color-picker-popup" id="add-spec-color-popup"></div></div></div>
+        </div>
+        <button class="btn-shift-add" id="btn-add-spec">+ Add Specialty</button>
+      </div>
+      <p class="dc-note">Note: NENP (combined slot) is auto-used when both NE and NP codes exist.</p>
+    </div>
+
+    <!-- Clinics section -->
+    <div class="shifts-section" id="stab-clinics">
+      <div class="shifts-list" id="shifts-clinics-list"></div>
+      <div class="shifts-add-form">
+        <h4>Add Clinic</h4>
+        <div class="shifts-add-row row4">
+          <div><label>Code</label><input id="add-clinic-code" maxlength="6" placeholder="OPD" style="text-transform:uppercase"></div>
+          <div><label>Label</label><input id="add-clinic-label" placeholder="Outpatient Clinic"></div>
+          <div><label>Short</label><input id="add-clinic-short" maxlength="8" placeholder="OPD"></div>
+          <div style="padding-top:18px"><div class="shift-color-swatch" id="add-clinic-color-swatch" style="background:#FEF3C7" data-color="FEF3C7"><div class="color-picker-popup" id="add-clinic-color-popup"></div></div></div>
+        </div>
+        <button class="btn-shift-add" id="btn-add-clinic">+ Add Clinic</button>
+      </div>
+      <p style="font-size:.76rem;color:var(--muted);margin-top:6px">Each clinic gets a weekly physician rotation. Remove all clinics to disable clinic assignments entirely.</p>
+    </div>
+
+    <!-- Duties section -->
+    <div class="shifts-section" id="stab-duties">
+      <div class="shifts-list" id="shifts-duties-list"></div>
+      <div class="shifts-add-form">
+        <h4>Add Duty Shift</h4>
+        <div class="shifts-add-row row5">
+          <div><label>Code</label><input id="add-duty-code" maxlength="6" placeholder="DN" style="text-transform:uppercase"></div>
+          <div><label>Label</label><input id="add-duty-label" placeholder="Night Duty"></div>
+          <div><label>Short</label><input id="add-duty-short" maxlength="8" placeholder="DN"></div>
+          <div><label>Hours</label><input id="add-duty-hours" type="number" min="1" max="24" value="16" style="width:50px"></div>
+          <div style="padding-top:18px"><div class="shift-color-swatch" id="add-duty-color-swatch" style="background:#FEF9C3" data-color="FEF9C3"><div class="color-picker-popup" id="add-duty-color-popup"></div></div></div>
+        </div>
+        <button class="btn-shift-add" id="btn-add-duty">+ Add Duty Shift</button>
+      </div>
+      <p style="font-size:.76rem;color:var(--muted);margin-top:6px">Minimum 1 duty shift required. Scheduler ensures one slot per duty type per day.</p>
+    </div>
+
+    <div class="modal-err" id="shifts-err"></div>
+    <div class="modal-footer">
+      <button class="btn-cancel" id="shifts-reset">Reset to Defaults</button>
+      <button class="btn-cancel" id="shifts-cancel">Cancel</button>
+      <button class="btn-ok" id="shifts-ok">Save &amp; Close</button>
+    </div>
+  </div>
+</div>
+
 <!-- ── Rules Modal ─────────────────────────────────────────────── -->
 <div class="modal-overlay" id="rules-modal" style="display:none">
   <div class="modal" style="max-width:520px">
@@ -359,6 +486,11 @@ table.summary .high{color:var(--danger);font-weight:700}
         <label>Min Duties / Physician</label>
         <input type="number" id="rule-min-duties" min="0" max="20" step="1">
         <span class="rules-desc">Minimum on-call shifts per month</span>
+      </div>
+      <div class="rule-field">
+        <label>Max Duties / Physician</label>
+        <input type="number" id="rule-max-duties" min="0" max="30" step="1">
+        <span class="rules-desc">Maximum on-call shifts per month (0 = no cap)</span>
       </div>
       <div class="rule-field">
         <label>Duty Shift Hours</label>
@@ -416,6 +548,7 @@ const DEFAULT_RULES = {
   max_consecutive_days: 6,
   post_call_days:       3,
   min_duties:           3,
+  max_duties:           0,   // 0 = uncapped
   min_hours:            160,
   max_hours:            168,
   duty_shift_hours:     16,
@@ -430,6 +563,7 @@ const S = {
   docs: [], asgn: {}, leaves: [], spec_blocks: [], manual_asgns: [],
   next_doc_id: 1, next_leave_id: 1, next_spec_block_id: 1, next_manual_id: 1,
   rules: Object.assign({}, DEFAULT_RULES),  // user-configurable scheduling rules
+  shiftConfig: null,  // populated after loadConstants()
   idToken: null,
   C: null,  // constants from server
   editing: null,  // {pid, day}
@@ -456,6 +590,7 @@ function captureHistoryState(){
     next_spec_block_id:S.next_spec_block_id,
     next_manual_id:S.next_manual_id,
     rules:S.rules,
+    shiftConfig:S.shiftConfig,
   });
 }
 function restoreHistoryState(state){
@@ -471,6 +606,7 @@ function restoreHistoryState(state){
   S.next_spec_block_id = state.next_spec_block_id;
   S.next_manual_id = state.next_manual_id;
   S.rules = deepClone(state.rules) || Object.assign({}, DEFAULT_RULES);
+  if(state.shiftConfig) { S.shiftConfig = deepClone(state.shiftConfig); rebuildDerivedConstants(); }
   renderAll();
   if(document.querySelector('.tab[data-tab="summary"]')?.classList.contains('active')) renderSummary();
   updateUndoRedoButtons();
@@ -612,7 +748,7 @@ $('redoBtn').onclick = redoAction;
 
 // ── Constants ──────────────────────────────────────────────────────
 async function loadConstants(){
-  try { S.C = await api('GET','/api/constants'); populateStaticDropdowns(); }
+  try { S.C = await api('GET','/api/constants'); S.shiftConfig = S.shiftConfig || deepClone(S.C.default_shift_config); rebuildDerivedConstants(); }
   catch(e){ toast('Could not load constants: '+e.message,4000); }
 }
 
@@ -666,8 +802,9 @@ function applyData(d){
   S.leaves=(d.leaves||[]).map(x=>({...x,id:+x.id,pid:+x.pid}));
   S.spec_blocks=(d.spec_blocks||[]).map(x=>({...x,id:+x.id}));
   S.manual_asgns=(d.manual_asgns||[]).map(x=>({...x,id:+x.id,pid:+x.pid,day:+x.day}));
-  // Restore rules, falling back to defaults for any missing keys (backward compat)
+  // Restore rules and shiftConfig, falling back to defaults for any missing keys
   S.rules = Object.assign({}, DEFAULT_RULES, d.rules||{});
+  if(d.shiftConfig) S.shiftConfig = d.shiftConfig;
   // Ensure boolean type for enforce_weekend_off (Firestore may return as string)
   S.rules.enforce_weekend_off = S.rules.enforce_weekend_off === true || S.rules.enforce_weekend_off === 'true';
 }
@@ -676,6 +813,7 @@ function initDefaultData(){
   S.docs=[]; S.asgn={}; S.leaves=[]; S.spec_blocks=[]; S.manual_asgns=[];
   S.next_doc_id=1; S.next_leave_id=1; S.next_spec_block_id=1; S.next_manual_id=1;
   S.rules=Object.assign({}, DEFAULT_RULES);
+  if(S.C) S.shiftConfig=deepClone(S.C.default_shift_config);
   resetHistory();
 }
 
@@ -683,7 +821,7 @@ function serializeState(){
   return {yr:S.yr,mo:S.mo,next_doc_id:S.next_doc_id,next_leave_id:S.next_leave_id,
     next_spec_block_id:S.next_spec_block_id,next_manual_id:S.next_manual_id,
     docs:S.docs,asgn:S.asgn,leaves:S.leaves,spec_blocks:S.spec_blocks,
-    manual_asgns:S.manual_asgns,rules:S.rules};
+    manual_asgns:S.manual_asgns,rules:S.rules,shiftConfig:S.shiftConfig};
 }
 
 $('btn-save').onclick = async()=>{
@@ -852,6 +990,7 @@ $('btn-autoschedule').onclick=async()=>{
       docs:S.docs,asgn:S.asgn,yr:S.yr,mo:S.mo,
       leaves:S.leaves,spec_blocks:S.spec_blocks,manual_asgns:S.manual_asgns,
       rules:S.rules,
+      shiftConfig:S.shiftConfig,
     });
     // Merge new assignments into S.asgn
     Object.assign(S.asgn, res.asgn);
@@ -970,7 +1109,7 @@ function renderManualList(){
 async function renderSummary(){
   if(!S.docs.length) return;
   try {
-    const res=await api('POST','/api/summary',{docs:S.docs,asgn:S.asgn,yr:S.yr,mo:S.mo,rules:S.rules});
+    const res=await api('POST','/api/summary',{docs:S.docs,asgn:S.asgn,yr:S.yr,mo:S.mo,rules:S.rules,shiftConfig:S.shiftConfig});
     const cols=['name','team','total','calls','daycare','postcall','off','leave','weekend_off'];
     const labels=['Physician','Team','Total Hrs','On-Calls','Daycare','Post-Call','Off','Leave','Weekend Off'];
     const thead=$('summary-head'), tbody=$('summary-body');
@@ -996,7 +1135,7 @@ async function doExport(type){
   const btn=$(type==='rota'?'btn-export-rota':'btn-export-full');
   btn.disabled=true; btn.innerHTML='<span class="spinner"></span>Exporting…';
   try {
-    const body={docs:S.docs,asgn:S.asgn,yr:S.yr,mo:S.mo};
+    const body={docs:S.docs,asgn:S.asgn,yr:S.yr,mo:S.mo,shiftConfig:S.shiftConfig};
     const hdrs={'Content-Type':'application/json','Authorization':`Bearer ${S.idToken}`};
     const res=await fetch(`/api/export/${type}`,{method:'POST',headers:hdrs,body:JSON.stringify(body)});
     if(!res.ok){ const e=await res.json(); throw new Error(e.error||'Export failed'); }
@@ -1069,6 +1208,7 @@ function openRulesModal(){
   $('rule-max-consecutive').value    = r.max_consecutive_days;
   $('rule-post-call-days').value     = r.post_call_days;
   $('rule-min-duties').value         = r.min_duties;
+  $('rule-max-duties').value         = r.max_duties ?? 0;
   $('rule-min-hours').value          = r.min_hours;
   $('rule-max-hours').value          = r.max_hours;
   $('rule-duty-shift-hours').value   = r.duty_shift_hours;
@@ -1088,10 +1228,14 @@ function applyRules(){
   }
   if(maxCon < 1){ $('rules-err').textContent = 'Max consecutive days must be ≥ 1.'; return; }
   if(pcDays < 1){ $('rules-err').textContent = 'Post-call days must be ≥ 1.'; return; }
+  const minD = +$('rule-min-duties').value;
+  const maxD = +$('rule-max-duties').value;
+  if(maxD > 0 && maxD < minD){ $('rules-err').textContent='Max duties must be ≥ min duties (or 0 for no cap).'; return; }
   S.rules = {
     max_consecutive_days: maxCon,
     post_call_days:       pcDays,
-    min_duties:           +$('rule-min-duties').value,
+    min_duties:           minD,
+    max_duties:           maxD,
     min_hours:            minH,
     max_hours:            maxH,
     duty_shift_hours:     +$('rule-duty-shift-hours').value,
@@ -1114,12 +1258,325 @@ $('rules-ok').onclick     = applyRules;
 $('rules-cancel').onclick = ()=>{ $('rules-modal').style.display='none'; };
 $('rules-reset').onclick  = resetRulesToDefaults;
 
-// ── Close modals on overlay click ─────────────────────────────────
-['cell-modal','leave-modal','block-modal','manual-modal','rules-modal'].forEach(id=>{
-  $(id).addEventListener('click',e=>{ if(e.target===$(id)) $(id).style.display='none'; });
+
+// ── Color palette for shift config ────────────────────────────────
+const COLOR_PALETTE = [
+  'DBEAFE','CCFBF1','EDE9FE','FFE4E6','FFEDD5','F3E8FF',
+  'CFFAFE','C7D7F9','E0F2FE','FEF3C7','FEF9C3','FCE7F3',
+  'D1FAE5','FEE2E2','E0E7FF','FEF08A','BBF7D0','FED7AA',
+  'F5D0FE','BAE6FD',
+];
+
+function initColorSwatch(swatchId, popupId, onPick) {
+  const swatch = $(swatchId);
+  const popup  = $(popupId);
+  if(!swatch || !popup) return;
+  // Populate palette
+  COLOR_PALETTE.forEach(hex => {
+    const sp = document.createElement('div');
+    sp.className = 'color-swatch-opt';
+    sp.style.background = '#'+hex;
+    sp.title = '#'+hex;
+    sp.onclick = e => {
+      e.stopPropagation();
+      swatch.style.background = '#'+hex;
+      swatch.dataset.color = hex;
+      popup.classList.remove('open');
+      if(onPick) onPick(hex);
+    };
+    popup.appendChild(sp);
+  });
+  swatch.onclick = e => {
+    e.stopPropagation();
+    // Close all other popups first
+    document.querySelectorAll('.color-picker-popup.open').forEach(p => {
+      if(p !== popup) p.classList.remove('open');
+    });
+    popup.classList.toggle('open');
+  };
+}
+
+document.addEventListener('click', () => {
+  document.querySelectorAll('.color-picker-popup.open').forEach(p => p.classList.remove('open'));
 });
 
-updateUndoRedoButtons();
-</script>
-</body>
-</html>
+// ── Rebuild S.C derived constants from S.shiftConfig ─────────────
+function rebuildDerivedConstants() {
+  if(!S.C || !S.shiftConfig) return;
+  const sc = S.shiftConfig;
+
+  // Migrate old dc_label/dc_short/dc_color format to clinics list
+  if(!sc.clinics) {
+    if(sc.dc_label || sc.dc_short || sc.dc_color) {
+      sc.clinics = [{code:'DC', label:sc.dc_label||'GP Clinic',
+                     short:sc.dc_short||'DC', color:sc.dc_color||'FEF3C7',
+                     hours:8, shift_type:'clinic', enabled:true}];
+    } else {
+      sc.clinics = [{code:'DC', label:'GP Clinic', short:'DC',
+                     color:'FEF3C7', hours:8, shift_type:'clinic', enabled:true}];
+    }
+  }
+
+  const shifts = {};
+  [...(sc.teams||[]), ...(sc.specialties||[]), ...(sc.duties||[]), ...(sc.clinics||[])].forEach(e => {
+    shifts[e.code] = {label:e.label, short:e.short, h:e.hours};
+  });
+  const subCodes = (sc.specialties||[]).map(e=>e.code);
+  if(subCodes.includes('NE') && subCodes.includes('NP')) {
+    const neH = (sc.specialties.find(e=>e.code==='NE')||{}).hours || 8;
+    shifts['NENP'] = {label:'Neurology + Nephrology', short:'NE/NP', h:neH};
+  }
+  shifts['PC'] = {label:'Post-Call Off', short:'PC', h:0};
+  shifts['O']  = {label:'Day Off',       short:'O',  h:0};
+  shifts['L']  = {label:'Annual Leave',  short:'L',  h:0};
+  shifts['R']  = {label:'Random Off',    short:'R',  h:0};
+  shifts['_']  = {label:'—',            short:'',   h:0};
+  S.C.shifts = shifts;
+
+  const colorMap = {};
+  [...(sc.teams||[]), ...(sc.specialties||[]), ...(sc.duties||[]), ...(sc.clinics||[])].forEach(e => {
+    colorMap[e.code] = e.color;
+  });
+  if(subCodes.includes('NE') && subCodes.includes('NP')) colorMap['NENP']='C7D7F9';
+  colorMap['PC']='EDE9FE'; colorMap['O']='F3F4F6'; colorMap['L']='D1FAE5';
+  colorMap['R']='FEE2E2'; colorMap['_']='FFFFFF';
+  S.C.color_map = colorMap;
+
+  S.C.teams    = (sc.teams||[]).map(e=>e.code);
+  S.C.subs     = (sc.specialties||[]).map(e=>e.code);
+  S.C.duty_set = (sc.duties||[]).map(e=>e.code);
+  S.C.clinic_set = (sc.clinics||[]).filter(e=>e.enabled!==false).map(e=>e.code);
+  S.C.morning_k = [...S.C.teams, ...S.C.subs];
+  if(subCodes.includes('NE') && subCodes.includes('NP')) S.C.morning_k.push('NENP');
+
+  S.C.spec_options = ['Not specified',
+    ...(sc.teams||[]).map(e=>e.label),
+    ...(sc.specialties||[]).map(e=>e.label)];
+
+  // manual_codes: teams + specs (excluding NE/NP if NENP exists) + clinics + duties
+  const mc = [...S.C.teams];
+  (sc.specialties||[]).forEach(e=>{ if(e.code!=='NE'&&e.code!=='NP') mc.push(e.code); });
+  if(subCodes.includes('NE')&&subCodes.includes('NP')){ mc.push('NE','NP','NENP'); }
+  else { if(subCodes.includes('NE')) mc.push('NE'); if(subCodes.includes('NP')) mc.push('NP'); }
+  (sc.clinics||[]).forEach(e=>mc.push(e.code));  // all clinics appear in manual_codes (for manual assignment)
+  (sc.duties||[]).forEach(e=>mc.push(e.code));
+  S.C.manual_codes = mc;
+  S.C.blockable = [...S.C.morning_k, ...(sc.clinics||[]).filter(e=>e.enabled!==false).map(e=>e.code)];
+
+  populateStaticDropdowns();
+}
+
+// ── Shifts modal ──────────────────────────────────────────────────
+// Working copy — edited in modal, only committed on Save
+let _sc_draft = null;
+
+function openShiftsModal() {
+  _sc_draft = JSON.parse(JSON.stringify(S.shiftConfig || S.C.default_shift_config));
+  // Ensure clinics array exists (migrate old format)
+  if(!_sc_draft.clinics) {
+    _sc_draft.clinics = [{code:'DC', label:_sc_draft.dc_label||'GP Clinic',
+                          short:_sc_draft.dc_short||'DC', color:_sc_draft.dc_color||'FEF3C7',
+                          hours:8, shift_type:'clinic', enabled:true}];
+  }
+  renderShiftsTabs();
+  renderShiftsSection('teams');
+  $('shifts-err').textContent = '';
+  $('shifts-modal').style.display = 'flex';
+}
+
+function renderShiftsTabs() {
+  document.querySelectorAll('.shifts-tab').forEach(t => {
+    t.onclick = () => {
+      document.querySelectorAll('.shifts-tab').forEach(x=>x.classList.remove('active'));
+      document.querySelectorAll('.shifts-section').forEach(x=>x.classList.remove('active'));
+      t.classList.add('active');
+      $('stab-'+t.dataset.stab).classList.add('active');
+      renderShiftsSection(t.dataset.stab);
+    };
+  });
+}
+
+function renderShiftsSection(section) {
+  if(section === 'teams')       renderShiftList('shifts-teams-list', _sc_draft.teams, 'team', false);
+  if(section === 'specialties') renderShiftList('shifts-specs-list', _sc_draft.specialties, 'specialty', false);
+  if(section === 'duties')      renderShiftList('shifts-duties-list', _sc_draft.duties, 'duty', true);
+  if(section === 'clinics')     renderShiftList('shifts-clinics-list', _sc_draft.clinics||[], 'clinic', false);
+  initAddFormSwatches();
+}
+
+function renderShiftList(listId, entries, stype, showHours) {
+  const ul = $(listId); ul.innerHTML = '';
+  const isClinic = stype === 'clinic';
+  entries.forEach((e, idx) => {
+    const row = document.createElement('div');
+    row.className = 'shift-row';
+    // Clinics get an extra checkbox column for "in schedule" toggle
+    if (isClinic) {
+      row.style.gridTemplateColumns = showHours ? '60px 1fr 70px 52px 28px 28px 28px' : '60px 1fr 70px 28px 28px 28px';
+    } else {
+      row.style.gridTemplateColumns = showHours ? '60px 1fr 70px 52px 28px 28px' : '60px 1fr 70px 28px 28px';
+    }
+    const isEnabled = e.enabled !== false;
+    row.innerHTML = `
+      <span class="shift-row-code" title="Code (immutable)">${e.code}</span>
+      <input data-field="label" data-idx="${idx}" data-stype="${stype}" value="${escHtml(e.label)}" placeholder="Label">
+      <input data-field="short" data-idx="${idx}" data-stype="${stype}" value="${escHtml(e.short)}" placeholder="Short" maxlength="8">
+      ${showHours ? `<input data-field="hours" data-idx="${idx}" data-stype="${stype}" type="number" min="1" max="24" value="${e.hours}" style="width:50px">` : ''}
+      <div class="shift-color-swatch" id="swatch-${stype}-${idx}" data-color="${e.color}" style="background:#${e.color}">
+        <div class="color-picker-popup" id="popup-${stype}-${idx}"></div>
+      </div>
+      ${isClinic ? `<input type="checkbox" class="clinic-enabled-chk" data-idx="${idx}" ${isEnabled ? 'checked' : ''} title="Include in schedule rotation">` : ''}
+      <button class="shift-del-btn" data-idx="${idx}" data-stype="${stype}" title="Delete">✕</button>`;
+    ul.appendChild(row);
+  });
+
+  // Wire input changes
+  ul.querySelectorAll('input[data-field]').forEach(inp => {
+    inp.oninput = () => {
+      const idx = +inp.dataset.idx, stype2 = inp.dataset.stype, field = inp.dataset.field;
+      const arr = stype2==='team' ? _sc_draft.teams : stype2==='specialty' ? _sc_draft.specialties : stype2==='clinic' ? (_sc_draft.clinics||[]) : _sc_draft.duties;
+      arr[idx][field] = field==='hours' ? +inp.value : inp.value;
+    };
+  });
+
+  // Wire clinic enabled checkboxes
+  ul.querySelectorAll('.clinic-enabled-chk').forEach(chk => {
+    chk.onchange = () => {
+      (_sc_draft.clinics||[])[+chk.dataset.idx].enabled = chk.checked;
+    };
+  });
+
+  // Wire delete buttons
+  ul.querySelectorAll('.shift-del-btn').forEach(btn => {
+    btn.onclick = () => {
+      const idx = +btn.dataset.idx, stype2 = btn.dataset.stype;
+      const arr = stype2==='team' ? _sc_draft.teams : stype2==='specialty' ? _sc_draft.specialties : stype2==='clinic' ? (_sc_draft.clinics||[]) : _sc_draft.duties;
+      if(stype2==='team' && arr.length <= 3) { $('shifts-err').textContent='Minimum 3 teams required.'; return; }
+      if(stype2==='duty' && arr.length <= 1) { $('shifts-err').textContent='Minimum 1 duty shift required.'; return; }
+      arr.splice(idx, 1);
+      $('shifts-err').textContent='';
+      renderShiftsSection(stype2==='team'?'teams':stype2==='specialty'?'specialties':stype2==='clinic'?'clinics':'duties');
+    };
+  });
+
+  // Wire color swatches
+  entries.forEach((e, idx) => {
+    initColorSwatchInline(`swatch-${stype}-${idx}`, `popup-${stype}-${idx}`, (hex) => {
+      const arr = stype==='team' ? _sc_draft.teams : stype==='specialty' ? _sc_draft.specialties : stype==='clinic' ? (_sc_draft.clinics||[]) : _sc_draft.duties;
+      arr[idx].color = hex;
+    });
+  });
+}
+
+
+function initColorSwatchInline(swatchId, popupId, onPick) {
+  const swatch = $(swatchId), popup = $(popupId);
+  if(!swatch||!popup) return;
+  popup.innerHTML='';
+  popup.className='color-picker-popup';
+  COLOR_PALETTE.forEach(hex=>{
+    const sp=document.createElement('div');
+    sp.className='color-swatch-opt';
+    sp.style.background='#'+hex;
+    sp.onclick=e=>{ e.stopPropagation(); swatch.style.background='#'+hex; swatch.dataset.color=hex; popup.classList.remove('open'); if(onPick) onPick(hex); };
+    popup.appendChild(sp);
+  });
+  swatch.onclick=e=>{ e.stopPropagation(); document.querySelectorAll('.color-picker-popup.open').forEach(p=>{if(p!==popup)p.classList.remove('open');}); popup.classList.toggle('open'); };
+}
+
+function initAddFormSwatches() {
+  ['add-team','add-spec','add-duty','add-clinic'].forEach(pfx=>{
+    const sw=$(pfx+'-color-swatch'), pop=$(pfx+'-color-popup');
+    if(!sw||!pop||pop.children.length>0) return;
+    COLOR_PALETTE.forEach(hex=>{
+      const sp=document.createElement('div');
+      sp.className='color-swatch-opt';
+      sp.style.background='#'+hex;
+      sp.onclick=e=>{ e.stopPropagation(); sw.style.background='#'+hex; sw.dataset.color=hex; pop.classList.remove('open'); };
+      pop.appendChild(sp);
+    });
+    sw.onclick=e=>{ e.stopPropagation(); document.querySelectorAll('.color-picker-popup.open').forEach(p=>{if(p!==pop)p.classList.remove('open');}); pop.classList.toggle('open'); };
+  });
+}
+
+function escHtml(s){ return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
+
+const SYSTEM_CODES = new Set(['PC','O','L','R','_','DC','NENP']);
+
+function validateNewCode(code, draft) {
+  if(!code) return 'Code is required.';
+  if(!/^[A-Z0-9]{1,6}$/.test(code)) return 'Code must be 1-6 uppercase letters/digits.';
+  if(SYSTEM_CODES.has(code)) return `"${code}" is a reserved system code.`;
+  const all = [...draft.teams,...draft.specialties,...draft.duties,...(draft.clinics||[])].map(e=>e.code);
+  if(all.includes(code)) return `Code "${code}" already exists.`;
+  return null;
+}
+
+$('btn-add-team').onclick = () => {
+  const code  = ($('add-team-code').value||'').trim().toUpperCase();
+  const label = ($('add-team-label').value||'').trim();
+  const short = ($('add-team-short').value||'').trim();
+  const color = $('add-team-color-swatch').dataset.color || 'DBEAFE';
+  const err = validateNewCode(code, _sc_draft);
+  if(err){ $('shifts-err').textContent=err; return; }
+  if(!label){ $('shifts-err').textContent='Label is required.'; return; }
+  if(!short){ $('shifts-err').textContent='Short name is required.'; return; }
+  _sc_draft.teams.push({code,label,short,color,hours:8,shift_type:'team'});
+  $('add-team-code').value=''; $('add-team-label').value=''; $('add-team-short').value='';
+  $('shifts-err').textContent='';
+  renderShiftsSection('teams');
+};
+
+$('btn-add-spec').onclick = () => {
+  const code  = ($('add-spec-code').value||'').trim().toUpperCase();
+  const label = ($('add-spec-label').value||'').trim();
+  const short = ($('add-spec-short').value||'').trim();
+  const color = $('add-spec-color-swatch').dataset.color || 'FFE4E6';
+  const err = validateNewCode(code, _sc_draft);
+  if(err){ $('shifts-err').textContent=err; return; }
+  if(!label){ $('shifts-err').textContent='Label is required.'; return; }
+  if(!short){ $('shifts-err').textContent='Short name is required.'; return; }
+  _sc_draft.specialties.push({code,label,short,color,hours:8,shift_type:'specialty'});
+  $('add-spec-code').value=''; $('add-spec-label').value=''; $('add-spec-short').value='';
+  $('shifts-err').textContent='';
+  renderShiftsSection('specialties');
+};
+
+$('btn-add-duty').onclick = () => {
+  const code  = ($('add-duty-code').value||'').trim().toUpperCase();
+  const label = ($('add-duty-label').value||'').trim();
+  const short = ($('add-duty-short').value||'').trim();
+  const hours = +($('add-duty-hours').value||16);
+  const color = $('add-duty-color-swatch').dataset.color || 'FEF9C3';
+  const err = validateNewCode(code, _sc_draft);
+  if(err){ $('shifts-err').textContent=err; return; }
+  if(!label){ $('shifts-err').textContent='Label is required.'; return; }
+  if(!short){ $('shifts-err').textContent='Short name is required.'; return; }
+  _sc_draft.duties.push({code,label,short,color,hours,shift_type:'duty'});
+  $('add-duty-code').value=''; $('add-duty-label').value=''; $('add-duty-short').value='';
+  $('shifts-err').textContent='';
+  renderShiftsSection('duties');
+};
+
+$('btn-add-clinic').onclick = () => {
+  const code  = ($('add-clinic-code').value||'').trim().toUpperCase();
+  const label = ($('add-clinic-label').value||'').trim();
+  const short = ($('add-clinic-short').value||'').trim();
+  const color = $('add-clinic-color-swatch').dataset.color || 'FEF3C7';
+  const err = validateNewCode(code, _sc_draft);
+  if(err){ $('shifts-err').textContent=err; return; }
+  if(!label){ $('shifts-err').textContent='Label is required.'; return; }
+  if(!short){ $('shifts-err').textContent='Short name is required.'; return; }
+  if(!_sc_draft.clinics) _sc_draft.clinics = [];
+  _sc_draft.clinics.push({code,label,short,color,hours:8,shift_type:'clinic',enabled:true});
+  $('add-clinic-code').value=''; $('add-clinic-label').value=''; $('add-clinic-short').value='';
+  $('shifts-err').textContent='';
+  renderShiftsSection('clinics');
+};
+
+$('shifts-ok').onclick = () => {
+  if(_sc_draft.teams.length < 3){ $('shifts-err').textContent='Minimum 3 teams required.'; return; }
+  if(_sc_draft.duties.length < 1){ $('shifts-err').textContent='Minimum 1 duty shift required.'; return; }
+  S.shiftConfig = JSON.parse(JSON.stringify(_sc_draft));
+  rebuildDerivedConstants();
+  $('shift

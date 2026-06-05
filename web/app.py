@@ -21,6 +21,7 @@ from scheduler import (
     auto_schedule, compute_summary, dim, ds, day_of_week, is_we,
     Doctor, LeaveBlock, SpecialtyBlock, ManualAssignment,
     ScheduleRules, DEFAULT_RULES,
+    ShiftEntry, ShiftConfig, DEFAULT_SHIFT_CONFIG,
     SHIFTS, COLOR_MAP, MONTHS, DN, TEAMS, SUBS, MORNING_K,
     DUTY_SET, OFF_SET, SPEC_OPTIONS, MANUAL_ASSIGN_CODES, BLOCKABLE_SPECIALTIES,
 )
@@ -149,6 +150,58 @@ def _manual_from(raw: List) -> List[ManualAssignment]:
     return [ManualAssignment(id=int(x["id"]),pid=int(x["pid"]),code=x["code"],day=int(x["day"]))
             for x in raw]
 
+def _shift_config_from(raw: Optional[Dict]) -> ShiftConfig:
+    """Parse a shift-config dict from the request body, falling back to defaults."""
+    if not raw:
+        return DEFAULT_SHIFT_CONFIG
+    d = DEFAULT_SHIFT_CONFIG
+
+    def parse_entries(lst, shift_type):
+        result = []
+        for item in (lst or []):
+            result.append(ShiftEntry(
+                code       = str(item.get("code", "")).strip().upper(),
+                label      = str(item.get("label", "")),
+                short      = str(item.get("short", "")),
+                color      = str(item.get("color", "DBEAFE")),
+                hours      = int(item.get("hours", 8)),
+                shift_type = shift_type,
+                enabled    = bool(item.get("enabled", True)),
+            ))
+        return result
+
+    teams       = parse_entries(raw.get("teams"),       "team")
+    specialties = parse_entries(raw.get("specialties"), "specialty")
+    duties      = parse_entries(raw.get("duties"),      "duty")
+
+    # Enforce minimums so the engine never crashes
+    if len(teams) < 3:
+        teams = d.teams
+    if len(duties) < 1:
+        duties = d.duties
+
+    # Parse clinics — support new format (clinics list) and old format (dc_label/dc_short/dc_color)
+    clinics_raw = raw.get("clinics")
+    if clinics_raw is not None:
+        clinics = parse_entries(clinics_raw, "clinic")
+        # Allow 0 clinics (disables clinic rotation)
+    else:
+        # Backward compat: old saved data used dc_label/dc_short/dc_color
+        default_clinic = d.clinics[0] if d.clinics else ShiftEntry("DC","GP Clinic","DC","FEF3C7",8,"clinic")
+        clinics = [ShiftEntry(
+            code       = "DC",
+            label      = str(raw.get("dc_label", default_clinic.label)),
+            short      = str(raw.get("dc_short", default_clinic.short)),
+            color      = str(raw.get("dc_color", default_clinic.color)),
+            hours      = 8,
+            shift_type = "clinic",
+        )]
+
+    return ShiftConfig(
+        teams=teams, specialties=specialties, duties=duties, clinics=clinics,
+    )
+
+
 def _rules_from(raw: Optional[Dict]) -> ScheduleRules:
     """Parse a rules dict from the request body, falling back to defaults for missing keys."""
     if not raw:
@@ -158,6 +211,7 @@ def _rules_from(raw: Optional[Dict]) -> ScheduleRules:
         max_consecutive_days = int(raw.get("max_consecutive_days", d.max_consecutive_days)),
         post_call_days       = int(raw.get("post_call_days",       d.post_call_days)),
         min_duties           = int(raw.get("min_duties",           d.min_duties)),
+        max_duties           = int(raw.get("max_duties",           d.max_duties)),
         min_hours            = int(raw.get("min_hours",            d.min_hours)),
         max_hours            = int(raw.get("max_hours",            d.max_hours)),
         duty_shift_hours     = int(raw.get("duty_shift_hours",     d.duty_shift_hours)),
@@ -175,7 +229,7 @@ def index():
 
 @app.route("/api/constants")
 def api_constants():
-    """Return all static constants the frontend needs."""
+    """Return all static constants the frontend needs (based on default shift config)."""
     return jsonify({
         "shifts":       SHIFTS,
         "color_map":    COLOR_MAP,
@@ -189,6 +243,13 @@ def api_constants():
         "spec_options": SPEC_OPTIONS,
         "manual_codes": MANUAL_ASSIGN_CODES,
         "blockable":    BLOCKABLE_SPECIALTIES,
+        # Default shift config for the frontend to initialise S.shiftConfig
+        "default_shift_config": {
+            "teams":      [{"code":e.code,"label":e.label,"short":e.short,"color":e.color,"hours":e.hours,"enabled":e.enabled} for e in DEFAULT_SHIFT_CONFIG.teams],
+            "specialties":[{"code":e.code,"label":e.label,"short":e.short,"color":e.color,"hours":e.hours,"enabled":e.enabled} for e in DEFAULT_SHIFT_CONFIG.specialties],
+            "duties":     [{"code":e.code,"label":e.label,"short":e.short,"color":e.color,"hours":e.hours,"enabled":e.enabled} for e in DEFAULT_SHIFT_CONFIG.duties],
+            "clinics":    [{"code":e.code,"label":e.label,"short":e.short,"color":e.color,"hours":e.hours,"enabled":e.enabled} for e in DEFAULT_SHIFT_CONFIG.clinics],
+        },
     })
 
 
@@ -200,11 +261,24 @@ def api_rules_defaults():
         "max_consecutive_days": r.max_consecutive_days,
         "post_call_days":       r.post_call_days,
         "min_duties":           r.min_duties,
+        "max_duties":           r.max_duties,
         "min_hours":            r.min_hours,
         "max_hours":            r.max_hours,
         "duty_shift_hours":     r.duty_shift_hours,
         "morning_shift_hours":  r.morning_shift_hours,
         "enforce_weekend_off":  r.enforce_weekend_off,
+    })
+
+
+@app.route("/api/shift-config/defaults")
+def api_shift_config_defaults():
+    """Return the default shift config so the frontend can pre-populate the Shifts modal."""
+    cfg = DEFAULT_SHIFT_CONFIG
+    return jsonify({
+        "teams":      [{"code":e.code,"label":e.label,"short":e.short,"color":e.color,"hours":e.hours,"enabled":e.enabled} for e in cfg.teams],
+        "specialties":[{"code":e.code,"label":e.label,"short":e.short,"color":e.color,"hours":e.hours,"enabled":e.enabled} for e in cfg.specialties],
+        "duties":     [{"code":e.code,"label":e.label,"short":e.short,"color":e.color,"hours":e.hours,"enabled":e.enabled} for e in cfg.duties],
+        "clinics":    [{"code":e.code,"label":e.label,"short":e.short,"color":e.color,"hours":e.hours,"enabled":e.enabled} for e in cfg.clinics],
     })
 
 
@@ -241,12 +315,14 @@ def api_schedule(token, user):
     spec_blocks  = _spec_blocks_from(body.get("spec_blocks", []))
     manual_asgns = _manual_from(body.get("manual_asgns", []))
     rules        = _rules_from(body.get("rules"))
+    shift_config = _shift_config_from(body.get("shiftConfig"))
 
     # Stamp manual assignments into base asgn before scheduling
     for ma in manual_asgns:
         asgn[f"{ma.pid}|{yr}|{mo}|{ma.day}"] = ma.code
 
-    result = auto_schedule(docs, asgn, leaves, spec_blocks, yr, mo, rules=rules)
+    result = auto_schedule(docs, asgn, leaves, spec_blocks, yr, mo,
+                           rules=rules, shift_config=shift_config)
     if "err" in result:
         return jsonify({"error": result["err"]}), 400
 
@@ -260,24 +336,26 @@ def api_schedule(token, user):
 @app.route("/api/summary", methods=["POST"])
 @require_auth
 def api_summary(token, user):
-    body  = request.get_json(force=True)
-    docs  = _docs_from(body.get("docs", []))
-    asgn  = body.get("asgn", {})
-    yr    = int(body["yr"])
-    mo    = int(body["mo"])
-    rules = _rules_from(body.get("rules"))
-    rows  = compute_summary(docs, asgn, yr, mo, rules=rules)
+    body         = request.get_json(force=True)
+    docs         = _docs_from(body.get("docs", []))
+    asgn         = body.get("asgn", {})
+    yr           = int(body["yr"])
+    mo           = int(body["mo"])
+    rules        = _rules_from(body.get("rules"))
+    shift_config = _shift_config_from(body.get("shiftConfig"))
+    rows         = compute_summary(docs, asgn, yr, mo, rules=rules, shift_config=shift_config)
     return jsonify({"rows": rows})
 
 
 @app.route("/api/export/rota", methods=["POST"])
 @require_auth
 def api_export_rota(token, user):
-    body = request.get_json(force=True)
-    docs = _docs_from(body.get("docs", []))
-    asgn = body.get("asgn", {})
-    yr   = int(body["yr"])
-    mo   = int(body["mo"])
+    body         = request.get_json(force=True)
+    docs         = _docs_from(body.get("docs", []))
+    asgn         = body.get("asgn", {})
+    yr           = int(body["yr"])
+    mo           = int(body["mo"])
+    shift_config = _shift_config_from(body.get("shiftConfig"))
 
     def get(pid, d): return asgn.get(f"{pid}|{yr}|{mo}|{d}", "_")
     def p2(n): return str(n).zfill(2)
@@ -297,13 +375,17 @@ def api_export_rota(token, user):
 
     td = dim(yr, mo)
     initials_map = gen_initials(docs)
+    color_map = shift_config.to_color_map()
 
-    ROTA_COLS = [
-        ("T1","T1"),("T2","T2"),("T3","T3"),
-        ("PU","PUL"),("CAHM","CA/HM"),("NE","NEU"),
-        ("NP","NEPH"),("GI","GAS"),("NENP","NE/NP"),("DC","Daycare"),
-        ("DM","On-Call(M)"),("DF","On-Call(F)"),
-    ]
+    # Build ROTA_COLS dynamically from shift config
+    sub_codes = shift_config.specialty_codes()
+    ROTA_COLS = (
+        [(e.code, e.short) for e in shift_config.teams] +
+        [(e.code, e.short) for e in shift_config.specialties] +
+        ([("NENP", "NE/NP")] if "NE" in sub_codes and "NP" in sub_codes else []) +
+        [(e.code, e.short) for e in shift_config.clinics] +
+        [(e.code, e.short) for e in shift_config.duties]
+    )
 
     wb = Workbook()
     ws = wb.active
@@ -348,7 +430,7 @@ def api_export_rota(token, user):
             cell = ws.cell(row=row, column=ci, value=val)
             cell.alignment = Alignment(horizontal="center", vertical="center")
             if not is_weekend and val:
-                cell.fill = PatternFill("solid", fgColor=COLOR_MAP.get(code,"FFFFFF"))
+                cell.fill = PatternFill("solid", fgColor=color_map.get(code,"FFFFFF"))
 
     # Legend
     leg_col = 3 + len(ROTA_COLS) + 1
@@ -376,16 +458,18 @@ def api_export_rota(token, user):
 @app.route("/api/export/full", methods=["POST"])
 @require_auth
 def api_export_full(token, user):
-    body = request.get_json(force=True)
-    docs = _docs_from(body.get("docs", []))
-    asgn = body.get("asgn", {})
-    yr   = int(body["yr"])
-    mo   = int(body["mo"])
+    body         = request.get_json(force=True)
+    docs         = _docs_from(body.get("docs", []))
+    asgn         = body.get("asgn", {})
+    yr           = int(body["yr"])
+    mo           = int(body["mo"])
+    shift_config = _shift_config_from(body.get("shiftConfig"))
 
     def get(pid, d): return asgn.get(f"{pid}|{yr}|{mo}|{d}", "_")
     def p2(n): return str(n).zfill(2)
 
-    td   = dim(yr, mo)
+    td        = dim(yr, mo)
+    color_map = shift_config.to_color_map()
     wb   = Workbook()
     ws   = wb.active
     ws.title = "Schedule"
@@ -417,10 +501,10 @@ def api_export_full(token, user):
             code = get(ph.id, d)
             cell = ws.cell(row=row,column=ci,value=SHIFTS[code]["short"] or "")
             cell.alignment = Alignment(horizontal="center",vertical="center")
-            cell.fill = PatternFill("solid",fgColor=COLOR_MAP.get(code,"FFFFFF"))
+            cell.fill = PatternFill("solid",fgColor=color_map.get(code,"FFFFFF"))
 
     # Summary rows
-    summary_rows = compute_summary(docs, asgn, yr, mo)
+    summary_rows = compute_summary(docs, asgn, yr, mo, shift_config=shift_config)
     sum_start = td + 6
     ws.cell(row=sum_start,column=1,value="Summary").font = Font(bold=True,size=12)
     metrics = [("Total Hrs","total"),("On-Calls","calls"),("Daycare","daycare"),
@@ -443,9 +527,4 @@ def api_export_full(token, user):
     wb.save(buf); buf.seek(0)
     filename = f"Schedule_{MONTHS[mo]}_{yr}.xlsx"
     return send_file(buf, as_attachment=True, download_name=filename,
-                     mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-
-
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port, debug=False)
+        
