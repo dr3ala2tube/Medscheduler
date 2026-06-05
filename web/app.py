@@ -527,4 +527,9 @@ def api_export_full(token, user):
     wb.save(buf); buf.seek(0)
     filename = f"Schedule_{MONTHS[mo]}_{yr}.xlsx"
     return send_file(buf, as_attachment=True, download_name=filename,
-        
+                     mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port, debug=False)
