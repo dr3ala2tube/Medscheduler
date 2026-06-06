@@ -195,6 +195,76 @@ table.summary .high{color:var(--danger);font-weight:700}
 .dc-edit-row label{font-size:.73rem;font-weight:600;color:var(--muted);text-transform:uppercase;margin-bottom:2px}
 .dc-edit-row input{padding:4px 7px;border:1.5px solid var(--border);border-radius:5px;font-size:.8rem;outline:none;width:100%}
 .dc-note{font-size:.76rem;color:var(--muted);margin-top:6px}
+
+/* ── Touch scrolling ─────────────────────────────────────────────── */
+.grid-wrap,.doc-list,.summary-wrap{-webkit-overflow-scrolling:touch}
+
+/* ── Sidebar drawer toggle (hidden on desktop) ───────────────────── */
+#btn-toggle-sidebar{display:none;background:rgba(255,255,255,.15);border:none;color:#fff;font-size:1.2rem;cursor:pointer;padding:4px 8px;border-radius:7px;flex-shrink:0;align-items:center;justify-content:center;line-height:1}
+#btn-toggle-sidebar:hover{background:rgba(255,255,255,.28)}
+#sidebar-backdrop{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:399}
+#sidebar-backdrop.visible{display:block}
+.sidebar-mobile-hdr{display:none;align-items:center;justify-content:space-between;padding:10px 12px 8px;border-bottom:1px solid var(--border);background:var(--surface);flex-shrink:0}
+.sidebar-mobile-hdr span{font-weight:700;font-size:.88rem;color:var(--primary)}
+#btn-close-sidebar{background:none;border:none;color:var(--muted);font-size:1rem;cursor:pointer;padding:3px 7px;border-radius:5px}
+#btn-close-sidebar:hover{color:var(--danger);background:#fee2e2}
+
+/* ── Tablet (≤900px) ─────────────────────────────────────────────── */
+@media(max-width:900px){
+  :root{--sidebar-w:200px}
+  .hdr-row2{overflow-x:auto;flex-wrap:nowrap;-webkit-overflow-scrolling:touch;scrollbar-width:thin}
+  .hdr-row2::-webkit-scrollbar{height:3px}
+  .hdr-row2::-webkit-scrollbar-thumb{background:rgba(255,255,255,.35);border-radius:3px}
+  .hdr-btn{flex-shrink:0}
+}
+
+/* ── Mobile (≤640px) ─────────────────────────────────────────────── */
+@media(max-width:640px){
+  body{height:100dvh}
+  #app{height:100dvh}
+
+  /* Prevent iOS input auto-zoom (triggers when font-size < 16px) */
+  input,select,textarea{font-size:16px!important}
+
+  /* Auth card: fluid width */
+  .auth-card{width:calc(100vw - 32px);padding:26px 18px}
+  .auth-logo{font-size:1.7rem}
+
+  /* Header row 1 */
+  .hdr-row1{height:44px;padding:0 8px;gap:6px}
+  #btn-toggle-sidebar{display:flex}
+  .logo{font-size:.9rem}
+  #user-email-lbl{display:none}
+  #month-label{min-width:76px;font-size:.84rem}
+  .month-nav{padding:3px 6px;gap:3px}
+  .user-badge button{padding:3px 8px;font-size:.75rem}
+
+  /* Header row 2: horizontally scrollable, no wrap */
+  .hdr-row2{flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;height:36px;padding:0 5px;gap:3px}
+  .hdr-row2::-webkit-scrollbar{display:none}
+  .hdr-btn{font-size:.72rem;padding:3px 7px;height:25px;flex-shrink:0}
+  .hdr-sep{height:18px;flex-shrink:0}
+
+  /* Sidebar: full-height slide-in drawer */
+  aside{position:fixed;top:0;left:0;bottom:0;z-index:400;transform:translateX(-110%);transition:transform .25s cubic-bezier(.4,0,.2,1);box-shadow:4px 0 24px rgba(0,0,0,.25);overflow-y:auto;display:flex!important}
+  aside.sidebar-open{transform:translateX(0)}
+  .sidebar-mobile-hdr{display:flex}
+
+  /* Tabs */
+  .tab{padding:9px 12px;font-size:.82rem}
+
+  /* Modals: fit screen */
+  .modal{max-width:calc(100vw - 20px)!important;padding:18px 16px}
+  .modal-overlay{padding:10px}
+  .rules-grid{grid-template-columns:1fr}
+  .shift-row{gap:4px;font-size:.78rem}
+
+  /* Summary */
+  .summary-wrap{padding:8px}
+
+  /* Status bar */
+  .statusbar{font-size:.72rem;padding:3px 10px}
+}
 </style>
 </head>
 <body>
@@ -220,6 +290,7 @@ table.summary .high{color:var(--danger);font-weight:700}
   <header>
     <!-- Row 1: branding + month nav + user -->
     <div class="hdr-row1">
+      <button id="btn-toggle-sidebar" title="Show/hide physicians">☰</button>
       <span class="logo">🩺 MedScheduler</span>
       <div class="month-nav">
         <button id="prev-month" title="Previous month">◀</button>
@@ -256,6 +327,10 @@ table.summary .high{color:var(--danger);font-weight:700}
   <div class="body">
     <!-- Sidebar -->
     <aside>
+      <div class="sidebar-mobile-hdr">
+        <span>Physicians</span>
+        <button id="btn-close-sidebar" title="Close">✕</button>
+      </div>
       <div class="sidebar-section">
         <h3>Add Physician</h3>
         <input type="text" id="doc-name" placeholder="Full name (e.g. DR. ALAA)">
@@ -272,6 +347,7 @@ table.summary .high{color:var(--danger);font-weight:700}
       </div>
       <div class="doc-list" id="doc-list"></div>
     </aside>
+    <div id="sidebar-backdrop"></div>
 
     <!-- Main content -->
     <main>
@@ -1601,6 +1677,35 @@ $('btn-shifts').onclick = openShiftsModal;
 });
 
 updateUndoRedoButtons();
+
+// ── Mobile sidebar drawer ─────────────────────────────────────────
+(function(){
+  const aside = document.querySelector('aside');
+  const backdrop = $('sidebar-backdrop');
+  function isMobile(){ return window.innerWidth <= 640; }
+  function openSidebar(){
+    aside.classList.add('sidebar-open');
+    backdrop.classList.add('visible');
+  }
+  function closeSidebar(){
+    aside.classList.remove('sidebar-open');
+    backdrop.classList.remove('visible');
+  }
+  $('btn-toggle-sidebar').onclick = () => {
+    if(aside.classList.contains('sidebar-open')) closeSidebar();
+    else openSidebar();
+  };
+  $('btn-close-sidebar').onclick = closeSidebar;
+  backdrop.onclick = closeSidebar;
+  // Auto-close after adding physician on mobile
+  document.getElementById('btn-add-doc').addEventListener('click', ()=>{
+    if(isMobile()) setTimeout(closeSidebar, 150);
+  });
+  // Close sidebar on resize to desktop
+  window.addEventListener('resize', ()=>{
+    if(!isMobile()) closeSidebar();
+  });
+})();
 </script>
 </body>
 </html>
