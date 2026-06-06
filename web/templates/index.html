@@ -1579,4 +1579,28 @@ $('shifts-ok').onclick = () => {
   if(_sc_draft.duties.length < 1){ $('shifts-err').textContent='Minimum 1 duty shift required.'; return; }
   S.shiftConfig = JSON.parse(JSON.stringify(_sc_draft));
   rebuildDerivedConstants();
-  $('shift
+  $('shifts-modal').style.display='none';
+  toast('✓ Shifts saved — run Auto-Schedule to apply');
+};
+
+$('shifts-cancel').onclick = () => { $('shifts-modal').style.display='none'; };
+
+$('shifts-reset').onclick = () => {
+  if(!confirm('Reset teams, specialties, duties and clinics to defaults (T1/T2/T3, CAHM/GI/NE/NP/PU, DM/DF, DC)?')) return;
+  S.shiftConfig = JSON.parse(JSON.stringify(S.C.default_shift_config));
+  rebuildDerivedConstants();
+  $('shifts-modal').style.display='none';
+  toast('Shifts reset to defaults');
+};
+
+$('btn-shifts').onclick = openShiftsModal;
+
+// ── Close modals on overlay click ─────────────────
+['cell-modal','leave-modal','block-modal','manual-modal','rules-modal','shifts-modal'].forEach(id=>{
+  $(id).addEventListener('click',e=>{ if(e.target===$(id)) $(id).style.display='none'; });
+});
+
+updateUndoRedoButtons();
+</script>
+</body>
+</html>

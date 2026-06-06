@@ -674,4 +674,26 @@ def compute_summary(docs, asgn, yr, mo, rules=None, shift_config=None):
     DUTY_SET_L   = shift_config.duty_set()
     CLINIC_SET_L = shift_config.clinic_set()
     _ch          = shift_config.code_hours()
-  
+    td = dim(yr, mo)
+    rows = []
+    for ph in docs:
+        _pid = ph.id
+        def get(d): return asgn.get(f"{_pid}|{yr}|{mo}|{d}", "_")
+        h8=h16=calls=daycare=postcall=off=leave=random=blocked=we_off=0
+        for d in range(1,td+1):
+            code=get(d); h=_ch.get(code,0)
+            if code in DUTY_SET_L:   h16+=h; calls+=1
+            elif h>0:                h8+=h
+            if code in CLINIC_SET_L: daycare+=1
+            if code=="PC":           postcall+=1
+            if code in ("O","R"):    off+=1
+            if code=="L":            leave+=1
+            if code=="R":            random+=1
+            if code=="_":            blocked+=1
+            if is_we(yr,mo,d) and code in OFF_SET: we_off+=1
+        rows.append({"name":ph.name,"team":ph.team,"initials":ph.initials,
+                     "h8":h8,"h16":h16,"total":h8+h16,"calls":calls,
+                     "daycare":daycare,"postcall":postcall,"off":off,
+                     "leave":leave,"random":random,"blocked":blocked,
+                     "weekend_off":we_off})
+    return rows
