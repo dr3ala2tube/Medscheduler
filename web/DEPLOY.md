@@ -51,8 +51,8 @@
 ```bash
 cd web/
 pip install -r requirements.txt
-export FIREBASE_PROJECT_ID=medscheduler-e0853
-export FIREBASE_API_KEY=AIzaSyC_d-HgnEnLAWW1f3dSKjuuAz4eplcVWz8
+export FIREBASE_PROJECT_ID=
+export FIREBASE_API_KEY=
 flask run --port 5000
 # open http://localhost:5000
 ```
