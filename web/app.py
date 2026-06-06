@@ -15,7 +15,7 @@ import urllib.error
 from functools import wraps
 from typing import Any, Dict, List, Optional
 
-from flask import Flask, jsonify, request, send_file, render_template, abort
+from flask import Flask, jsonify, request, send_file, render_template, abort, send_from_directory
 
 from scheduler import (
     auto_schedule, compute_summary, dim, ds, day_of_week, is_we,
@@ -225,6 +225,20 @@ def _rules_from(raw: Optional[Dict]) -> ScheduleRules:
 @app.route("/")
 def index():
     return render_template("index.html")
+
+
+# ── PWA static files (must be served from root for correct SW scope) ──────────
+@app.route("/manifest.json")
+def pwa_manifest():
+    return send_from_directory(app.static_folder, "manifest.json")
+
+
+@app.route("/sw.js")
+def pwa_sw():
+    resp = send_from_directory(app.static_folder, "sw.js")
+    resp.headers["Service-Worker-Allowed"] = "/"
+    resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    return resp
 
 
 @app.route("/api/constants")
