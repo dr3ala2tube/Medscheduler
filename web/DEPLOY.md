@@ -28,8 +28,8 @@
 
 5. Add these **environment variables** in Render dashboard:
    ```
-   FIREBASE_PROJECT_ID   = medscheduler-e0853
-   FIREBASE_API_KEY      = AIzaSyC_d-HgnEnLAWW1f3dSKjuuAz4eplcVWz8
+   FIREBASE_PROJECT_ID   = 
+   FIREBASE_API_KEY      = 
    ```
 
 6. Click **Deploy**. Render gives you a public URL like `https://medscheduler.onrender.com`.
