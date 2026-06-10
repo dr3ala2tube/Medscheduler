@@ -1,6 +1,6 @@
 # PROJECT_MAP.md
 
-Last updated: 2026-06-10 — M1–M4 complete and live (web merged to `main`, deployed on Render `medscheduler-5io6.onrender.com`; desktop updated with workspace support). **FEATURE CYCLE 2 COMPLETE AND LIVE (M5–M10, deployed 2026-06-10):** legacy-import prompt removed, email verification for new signups, invitation accept/decline/leave with per-user notifications panel, UI alignment fixes. Rules v2 (invites + notifications) published in Firebase Console.
+Last updated: 2026-06-11 — M1–M4 complete and live (web merged to `main`, deployed on Render `medscheduler-5io6.onrender.com`; desktop updated with workspace support). **FEATURE CYCLE 2 COMPLETE AND LIVE (M5–M10, deployed 2026-06-10):** legacy-import prompt removed, email verification for new signups, invitation accept/decline/leave with per-user notifications panel, UI alignment fixes. Rules v2 (invites + notifications) published in Firebase Console. **FEATURE CYCLE 3 PLANNED 2026-06-11 (M11–M14, branch `feature/conflicts-audit`): conflict detection + audit trail — awaiting approval.**
 
 ## [TECH_STACK]
 
@@ -88,6 +88,12 @@ All Firestore calls keep the existing pattern: user's ID token, urllib REST, `_p
 - **D9 — Notifications stored at `notifications/{recipientUid}/items/{autoId}`** with fields `type` (invite_accepted | invite_declined | member_left), `actor_email`, `ws_id`, `created`, `read`. Rules: any authenticated user may CREATE into another user's feed but only with validated fields and `actor_email == request.auth.token.email`; only the recipient can read/list/delete, and update may touch only `read`. Spam-creation risk accepted for a small trusted team. "You were invited" is NOT a stored notification — pending invites are discovered live via the workspaces query (works even when the invitee registers after being invited).
 - **D10 — Notifications panel refreshes by 60-second polling** (user decision) plus refresh on login and on panel open. No push infrastructure added.
 
+### Cycle 3 decisions (2026-06-11, user-confirmed scope)
+
+- **D11 — Conflict = duplicate single-slot assignment; computed client-side, never persisted.** In the grid model each physician has exactly one code per day, so the only "double-booking" is the same single-slot code given to 2+ physicians on the same day. Single-slot codes = enabled duty codes (`duty_set`) ∪ enabled clinic codes (`clinic_set`) — [V] verified against scheduler.py: phases 4/4.5/5 assign exactly one physician per duty side per day and one per clinic per weekday. Teams/specialties excluded (multiple physicians legitimate; revisit if requested). Conflicts are DERIVED data: recomputed in the frontend from `S.asgn` on render/edit/save (O(cells) per month, trivial). No `conflictFlags` schema field, no API change, no Firestore change → fully reversible, zero migration. **Behavior: warn + allow override (user decision)** — warning with details at cell-edit/manual-assign time, red highlight on conflicting cells, warning toast on save; never blocks (intentional double-cover stays possible).
+- **D12 — Audit trail: one immutable entry per successful web save, diffed server-side in Flask.** Schedule is saved as a whole blob, so "who changed what" = diff(previous doc, new payload) computed in `POST /api/data`: one extra Firestore read (old doc) per save, then `fs_create` into `workspaces/{wsId}/audit/items/{autoId}` with `actor_email`, `created` (ISO 8601), `summary` (counts per category), `changes` (human-readable lines, e.g. "Dr. Ali 2026-06-14: T1 → DM", capped at 300 + "…and N more"), covering asgn / docs / leaves / spec_blocks / manual_asgns / rules / shiftConfig; first-ever save logs a single "initial snapshot" entry without per-line diff. Audit write is best-effort AFTER a successful save (same pattern as `_notify`): a failed audit write never rolls back the save; response carries `audited: false` so the UI can warn. Accepted gap: save and audit write are not atomic. **Desktop saves bypass Flask and produce NO audit entries (user decision: web-only this cycle)** — tracked in [ORPHANS].
+- **D13 — Audit visibility: owner + accepted members (user decision); entries immutable.** Rules block `workspaces/{wsId}/audit/items/{itemId}`: `create` allowed for owner or accepted member with strictly validated fields and `actor_email == request.auth.token.email`; `get/list` for owner or accepted member (same `get()` membership lookup as `data/schedule`); NO update, NO delete — history cannot be rewritten, even by the owner. `GET /api/audit?ws=` returns newest-first, limit 50 (mirrors notifications query pattern). No retention policy this cycle → [ORPHANS].
+
 ## [MILESTONES]
 
 - **M1 — Backend + rules — DONE 2026-06-10** (branch: `feature/private-workspaces`)
@@ -134,9 +140,47 @@ All Firestore calls keep the existing pattern: user's ID token, urllib REST, `_p
 
 **Rollback (cycle 2):** restore previous Firestore rules from Firebase Console rules history; revert the feature branch (no main merge until approval); legacy `shared/schedule` doc is never modified or deleted.
 
+### Feature cycle 3 (branch: `feature/conflicts-audit`, T4: merge approval required) — PLANNED, AWAITING APPROVAL
+
+Pre-flight: working tree on `main` has UNCOMMITTED desktop workspace changes (`firebase_service.py` +88, `medscheduler_refactored.py` +142). These must be committed (or stashed) on `main` BEFORE branching so cycle-3 commits stay clean. (The large web-file diffs in `git diff` are CRLF-only — Windows checkout artifact; `--ignore-cr-at-eol` confirms content-identical.)
+
+- **M11 — Audit backend + rules** (L3: new sub-collection + rules + endpoint)
+  - app.py: pure function `compute_audit_diff(old_payload, new_payload) -> {summary, changes}` (resolves doctor names from payload `docs`; cap 300 lines); `api_save` loads old doc, saves, then best-effort `fs_create` audit entry (response gains `audited` bool); new `GET /api/audit?ws=` via parametrized reuse of the notifications runQuery pattern
+  - firestore.rules: `workspaces/{wsId}/audit/items` block per D13
+  - Pass (V2): mocked-Firestore scenarios — first-save snapshot; asgn set/clear/change with name resolution; doctor add/remove; leave/manual/spec-block/rules/shiftConfig diffs; >300-line truncation; audit-write failure → save still ok + `audited:false`; GET newest-first + limit; 400 bad ws id. Rules Playground dry-run (member create-with-own-email OK, forged actor_email rejected, non-member read rejected, update/delete rejected) REQUIRED before M14 publish
+- **M12 — Conflict detection frontend** (L1/L2: index.html only, no API/schema change)
+  - `computeConflicts()` over `S.asgn` for current month → `[{day, code, pids}]` + involved-cell set; single-slot codes from `S.shiftConfig` duties + enabled clinics
+  - renderSchedule: `.cell-conflict` red outline on involved cells; ⚠ count chip in header row 2 (hidden when 0), click → list of conflicts (day, code, physician names)
+  - cell-edit Apply + manual-assign Add: if the chosen code creates a duplicate-slot conflict, show inline warning naming the other physician(s) in the existing `.modal-err` area; first click warns, second click applies (override allowed per D11)
+  - btn-save: conflicts present → still saves, warning toast "Saved — ⚠ N conflict(s)"
+  - Pass (V2): node --check; logic tests of `computeConflicts` (no-conflict, 2×DM same day, DM+DF same day not a conflict, clinic duplicate, disabled clinic ignored, cross-month keys ignored) run via node on extracted function; Flask render test (new element ids)
+- **M13 — Audit history frontend** (L2)
+  - index.html: 📜 History button (header row 2) → modal: newest-first entries "actor · relative time · summary", expandable per-entry change lines; fetch `GET /api/audit?ws=` on open; visible to owner and members alike (D13); toast warning when a save returns `audited:false`
+  - Pass (V2): node --check, element-id checks, Flask render test
+- **M14 — V3 verification + deploy + docs**
+  - Deploy order: publish rules FIRST (safe both ways here: old code never touches `audit`; new code + old rules only degrades to `audited:false` because audit writes are best-effort — but rules-first stays the standard)
+  - Live matrix: two accounts — member edits & saves shared ws → owner sees audit entry with member's email + correct diff; owner edit → member sees entry; assign DM to two physicians same day → warn at edit, red highlight both cells, save toast shows count, second account sees highlights after load; non-member cannot read audit (direct REST probe); history modal at 360/640/900px
+  - Update PROJECT_MAP.md (mark milestones done, move [A]→[V]) + PROJECT_STATE.md; commit messages per milestone; merge via PR after approval
+
+**Assumptions (cycle 3):**
+- [V] Duty and clinic codes are single-slot (one physician/day) — verified in scheduler.py auto-schedule phases 4/4.5/5.
+- [A] One audit entry per Save click is the right granularity (saves are whole-blob; per-keystroke history not possible without schema redesign).
+- [A] Audit volume is low (small team, manual saves) → 1 extra read + 1 write per save and no retention policy are acceptable.
+- [A] Desktop-originated saves appearing in history is NOT expected by users this cycle (web-only decision); gap documented in [ORPHANS] and History modal is web-data only.
+
+**Risks (cycle 3):**
+- Save and audit write are not atomic; a crash between them silently loses one history entry (caught failures do surface as `audited:false`). Accepted for T4 because the alternative (blocking saves on audit failure) harms schedule availability.
+- Concurrent saves remain last-write-wins (existing behavior); interleaved audit entries each diff against the doc state their own save observed, so history can show two entries with overlapping diffs — readable, not corrupting.
+- Rules `get()` membership lookup in the audit block adds one document read per audit op (same cost pattern already accepted for `data/schedule`).
+
+**Rollback (cycle 3):** restore previous rules from Firebase Console history; revert branch/PR (Render redeploys old code); audit sub-collection is additive — old code never reads it; conflicts are client-derived and leave no data behind; no schema or legacy-doc changes anywhere.
+
 ## [ORPHANS]
 
 - Firebase web API key hardcoded in `app.py`/`index.html` and also expected as env var per DEPLOY.md — harmless (web API keys are public identifiers) but inconsistent; consider consolidating to env vars later.
 - Open self-signup (`createUserWithEmailAndPassword`) remains enabled; M6 email verification reduces abuse, but an email allowlist remains an optional hardening step.
 - Notifications have no retention/purge policy (capped at 50 most-recent per fetch); add cleanup later if volume grows.
 - Desktop app (`firebase_service.py`/`medscheduler_refactored.py`) will NOT gain invite-respond/notifications UI in this cycle; pending invites are simply not shown there. Members who accepted via web work normally on desktop. Follow-up if desktop parity is wanted.
+- (Cycle 3) Desktop saves bypass Flask → produce NO audit entries and run NO conflict checks (user decision 2026-06-11: web-only). A desktop edit appears in web history only indirectly, as a larger diff attributed to the next web save. Follow-up if desktop parity is wanted.
+- (Cycle 3) Audit log has no retention/purge policy (reads capped at 50 newest); entries are immutable and grow unbounded — add retention later if volume grows.
+- (Cycle 3) Conflict scope limited to duplicate duty/clinic slots; assignment-during-leave, missing post-call rest, and specialty duplicates intentionally excluded (user decision 2026-06-11) — natural extensions of `computeConflicts()` if wanted later.
