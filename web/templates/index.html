@@ -35,7 +35,9 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(
 .auth-err{color:var(--danger);font-size:.85rem;min-height:20px;margin-top:10px;text-align:center}
 .btn-primary{width:100%;padding:11px;background:var(--primary);color:#fff;border:none;border-radius:8px;font-size:.95rem;font-weight:600;cursor:pointer;margin-top:20px;transition:background .15s}
 .btn-primary:hover{background:var(--primary-dark)}
-.btn-link{background:none;border:none;color:var(--primary);font-size:.87rem;cursor:pointer;margin-top:12px;display:block;text-align:center;text-decoration:underline}
+.btn-link{background:none;border:none;color:var(--primary);font-size:.87rem;cursor:pointer;margin-top:12px;display:block;text-align:center;text-decoration:underline;width:100%}
+.btn-link:disabled{opacity:.5;cursor:not-allowed}
+.verify-text{font-size:.9rem;text-align:center;line-height:1.5;word-break:break-all}
 
 /* ── Main App Layout ───────────────────────────────────────────── */
 #app{display:none;flex-direction:column;height:100vh;overflow:hidden}
@@ -284,7 +286,7 @@ table.summary .high{color:var(--danger);font-weight:700}
 
 <!-- ── Auth Screen ─────────────────────────────────────────────── -->
 <div id="auth-screen">
-  <div class="auth-card">
+  <div class="auth-card" id="login-card">
     <div class="auth-logo">🩺 MedScheduler</div>
     <div class="auth-sub">Team Schedule Management</div>
     <label>Email address</label>
@@ -294,6 +296,16 @@ table.summary .high{color:var(--danger);font-weight:700}
     <div class="auth-err" id="auth-err"></div>
     <button class="btn-primary" id="btn-signin">Sign In</button>
     <button class="btn-link" id="btn-create">Create account instead</button>
+  </div>
+  <div class="auth-card" id="verify-card" style="display:none">
+    <div class="auth-logo">🩺 MedScheduler</div>
+    <div class="auth-sub">Verify your email</div>
+    <p class="verify-text">We sent a verification link to<br><strong id="verify-email"></strong></p>
+    <p class="verify-text" style="margin-top:8px;color:var(--muted)">Open the email, click the link, then continue below.</p>
+    <div class="auth-err" id="verify-err"></div>
+    <button class="btn-primary" id="btn-verified">I've verified — continue</button>
+    <button class="btn-link" id="btn-resend">Resend verification email</button>
+    <button class="btn-link" id="btn-verify-signout">Sign out</button>
   </div>
 </div>
 
@@ -655,6 +667,11 @@ const fbApp = firebase.initializeApp({
 });
 const auth = firebase.auth();
 
+// Accounts created at/after this moment must verify their email before use.
+// Pre-existing accounts are grandfathered. MUST match VERIFICATION_CUTOFF_MS in app.py.
+// 2026-06-10T00:00:00Z
+const VERIFICATION_CUTOFF_MS = 1781049600000;
+
 // ── Default scheduling rules (mirrors ScheduleRules defaults in scheduler.py) ──
 const DEFAULT_RULES = {
   max_consecutive_days: 6,
@@ -817,13 +834,81 @@ async function doAuth(isCreate){
   if(!email||!pw){ $('auth-err').textContent='Please fill in both fields.'; return; }
   $('btn-signin').disabled=true; $('btn-signin').innerHTML='<span class="spinner"></span>Connecting…';
   try {
-    if(isCreate) await auth.createUserWithEmailAndPassword(email,pw);
-    else         await auth.signInWithEmailAndPassword(email,pw);
+    if(isCreate){
+      const cred = await auth.createUserWithEmailAndPassword(email,pw);
+      // New accounts must verify their email (gate lives in onAuthStateChanged)
+      try { await cred.user.sendEmailVerification(); } catch(_){}
+    } else {
+      await auth.signInWithEmailAndPassword(email,pw);
+    }
   } catch(e){
     $('auth-err').textContent = friendlyAuthError(e.code);
     $('btn-signin').disabled=false; $('btn-signin').textContent='Sign In';
   }
 }
+
+// ── Email verification gate (new accounts only — see VERIFICATION_CUTOFF_MS) ──
+function needsEmailVerification(user){
+  if(user.emailVerified) return false;
+  const created = Date.parse((user.metadata && user.metadata.creationTime) || '') || 0;
+  return created >= VERIFICATION_CUTOFF_MS;
+}
+
+function resetSigninBtn(){
+  $('btn-signin').disabled=false; $('btn-signin').textContent='Sign In';
+}
+
+function showVerifyScreen(user){
+  $('verify-email').textContent = user.email;
+  $('verify-err').textContent = '';
+  $('login-card').style.display='none';
+  $('verify-card').style.display='block';
+  $('auth-screen').style.display='flex';
+  $('app').classList.remove('visible');
+  resetSigninBtn();
+}
+
+function showLoginCard(){
+  $('verify-card').style.display='none';
+  $('login-card').style.display='block';
+}
+
+$('btn-verified').onclick = async()=>{
+  const u = auth.currentUser;
+  if(!u){ showLoginCard(); return; }
+  $('verify-err').textContent='';
+  $('btn-verified').disabled=true; $('btn-verified').innerHTML='<span class="spinner"></span>Checking…';
+  try {
+    await u.reload();
+    if(auth.currentUser && auth.currentUser.emailVerified){
+      location.reload();   // re-run auth flow with verified account
+      return;
+    }
+    $('verify-err').textContent='Not verified yet — click the link in the email first.';
+  } catch(e){
+    $('verify-err').textContent=friendlyAuthError(e.code)||e.message;
+  } finally {
+    $('btn-verified').disabled=false; $('btn-verified').textContent="I've verified — continue";
+  }
+};
+
+$('btn-resend').onclick = async()=>{
+  const u = auth.currentUser;
+  if(!u) return;
+  $('verify-err').textContent='';
+  try {
+    await u.sendEmailVerification();
+    toast('Verification email sent to '+u.email);
+    $('btn-resend').disabled=true;
+    setTimeout(()=>{ $('btn-resend').disabled=false; }, 30000);
+  } catch(e){
+    $('verify-err').textContent = e.code==='auth/too-many-requests'
+      ? 'Too many requests — please wait a minute before resending.'
+      : (friendlyAuthError(e.code)||e.message);
+  }
+};
+
+$('btn-verify-signout').onclick = ()=> auth.signOut();
 
 function friendlyAuthError(code){
   const m={
@@ -840,6 +925,8 @@ function friendlyAuthError(code){
 
 auth.onAuthStateChanged(async user => {
   if(user){
+    if(needsEmailVerification(user)){ showVerifyScreen(user); return; }
+    showLoginCard();   // make sure the verify card is hidden for next sign-out
     S.idToken = await user.getIdToken();
     // Refresh token every 50 min
     setInterval(async()=>{ S.idToken = await user.getIdToken(true); }, 50*60*1000);
@@ -851,9 +938,10 @@ auth.onAuthStateChanged(async user => {
     await loadData();
     renderAll();
   } else {
+    showLoginCard();
     $('auth-screen').style.display='flex';
     $('app').classList.remove('visible');
-    $('btn-signin').disabled=false; $('btn-signin').textContent='Sign In';
+    resetSigninBtn();
   }
 });
 

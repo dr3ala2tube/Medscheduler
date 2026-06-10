@@ -1,6 +1,6 @@
 # PROJECT_MAP.md
 
-Last updated: 2026-06-10 — M1–M4 complete and live (web merged to `main`, deployed on Render `medscheduler-5io6.onrender.com`; desktop updated with workspace support). **NEW FEATURE CYCLE IN PROGRESS (M5–M10, approved; M5 implemented):** remove legacy-import prompt, email verification for new signups, invitation accept/decline/leave with per-user notifications panel, UI alignment review.
+Last updated: 2026-06-10 — M1–M4 complete and live (web merged to `main`, deployed on Render `medscheduler-5io6.onrender.com`; desktop updated with workspace support). **NEW FEATURE CYCLE IN PROGRESS (M5–M10, approved; M5–M6 implemented):** remove legacy-import prompt, email verification for new signups, invitation accept/decline/leave with per-user notifications panel, UI alignment review.
 
 ## [TECH_STACK]
 
@@ -109,10 +109,10 @@ All Firestore calls keep the existing pattern: user's ID token, urllib REST, `_p
   - app.py: deleted `/api/data/import-legacy` route + `LEGACY_DOC` constant
   - firestore.rules: dropped the legacy `shared/schedule` block (doc itself stays in Firestore untouched as backup); rules go live with M10 publish
   - Pass: new account → empty schedule, no prompt; `node --check`, py_compile, Flask render test
-- **M6 — Email verification for new signups** (L2, auth change — explicit approval required)
+- **M6 — Email verification for new signups — IMPLEMENTED 2026-06-10** (L2, auth change)
   - index.html: after `createUserWithEmailAndPassword` → `sendEmailVerification()` → verify screen (resend + "I've verified" + sign-out); same gate on sign-in when `!user.emailVerified` and `user.metadata.creationTime >= cutoff`
   - app.py: `VERIFICATION_CUTOFF` constant (deploy date, epoch ms); `require_auth` returns 403 `email-not-verified` when `createdAt >= cutoff and not emailVerified`
-  - Pass: new signup blocked until verified (then full access); pre-cutoff account unaffected; mocked tests for both paths
+  - Pass (verified): mocked require_auth matrix — new+unverified 403 `email-not-verified`, new+verified 200, pre-cutoff unverified 200, missing createdAt 200, no token 401; node --check; render test (verify card + cutoff present). Cutoff = 1781049600000 (2026-06-10T00:00:00Z), identical in app.py and index.html. Live email-delivery check deferred to M10 matrix
 - **M7 — Invitations backend + rules** (L3)
   - app.py: `GET /api/workspaces` also returns `own.invites` + `invites:[{id,owner_email}]` (second runQuery on `invites` array-contains email); `POST /api/workspaces/members` add→`invites`, remove→both arrays; NEW `POST /api/invitations/respond` {ws_id, action} and `POST /api/workspaces/leave` {ws_id} (meta transition + notification doc); NEW `GET /api/notifications` (runQuery, created desc, limit 50) and `POST /api/notifications/read` (PATCH with `updateMask.fieldPaths=read`)
   - firestore.rules: meta get/list extended to invitees; self-service diff-validated update clauses; owner update may not change `owner_uid`/`owner_email`; `notifications/{uid}/items` block per D9

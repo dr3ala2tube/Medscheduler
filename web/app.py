@@ -38,6 +38,11 @@ PROJECT_ID        = "medscheduler-e0853"
 FIRESTORE_BASE    = (f"https://firestore.googleapis.com/v1/projects/{PROJECT_ID}"
                      f"/databases/(default)/documents")
 
+# Accounts created at/after this moment (epoch ms, 2026-06-10T00:00:00Z) must
+# have a verified email; accounts created before it are grandfathered.
+# MUST match VERIFICATION_CUTOFF_MS in templates/index.html.
+VERIFICATION_CUTOFF_MS = 1781049600000
+
 def ws_meta_url(ws_id: str) -> str:
     """Workspace meta/ACL document (owner_uid, owner_email, members)."""
     return f"{FIRESTORE_BASE}/workspaces/{ws_id}"
@@ -185,6 +190,14 @@ def require_auth(f):
         user  = verify_token(token)
         if user is None:
             return jsonify({"error": "Invalid or expired token"}), 401
+        # Email verification: required for accounts created after the cutoff
+        # (identitytoolkit lookup returns createdAt in epoch ms and emailVerified).
+        try:
+            created_ms = int(user.get("createdAt", "0"))
+        except (TypeError, ValueError):
+            created_ms = 0
+        if created_ms >= VERIFICATION_CUTOFF_MS and not user.get("emailVerified", False):
+            return jsonify({"error": "email-not-verified"}), 403
         return f(token, user, *args, **kwargs)
     return wrapper
 
