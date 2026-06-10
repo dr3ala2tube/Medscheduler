@@ -1,6 +1,6 @@
 # PROJECT_MAP.md
 
-Last updated: 2026-06-10 — M1–M4 complete and live (web merged to `main`, deployed on Render `medscheduler-5io6.onrender.com`; desktop updated with workspace support). **NEW FEATURE CYCLE IN PROGRESS (M5–M10, approved; M5–M7 implemented):** remove legacy-import prompt, email verification for new signups, invitation accept/decline/leave with per-user notifications panel, UI alignment review.
+Last updated: 2026-06-10 — M1–M4 complete and live (web merged to `main`, deployed on Render `medscheduler-5io6.onrender.com`; desktop updated with workspace support). **NEW FEATURE CYCLE IN PROGRESS (M5–M10, approved; M5–M8 implemented):** remove legacy-import prompt, email verification for new signups, invitation accept/decline/leave with per-user notifications panel, UI alignment review.
 
 ## [TECH_STACK]
 
@@ -66,8 +66,10 @@ Implemented in M7: `POST /api/invitations/respond` (accept/decline, notifies own
 All Firestore calls keep the existing pattern: user's ID token, urllib REST, `_py_to_fs`/`_fs_to_py`. Enforcement lives in Firestore rules, not in Flask — Flask never holds elevated credentials.
 
 ### Frontend (web/templates/index.html)
-- `S.wsId` state (default = own uid), `S.workspaces` list; workspace switcher + "Shared by" badge in header row 1
-- Share modal (owner only): member email list, add input, remove buttons → `/api/workspaces/members`
+- `S.wsId` state (default = own uid), `S.workspaces` `{own, shared, invites}`, `S.notifications`; workspace switcher + "Shared by" badge + 🚪 Leave button (shared ws only) in header row 1
+- 🔔 bell + unread badge (user-badge group): notifications modal — pending invites (Accept/Decline) + activity feed; opening marks unread read; 60s poll (`startNotifPolling`/`stopNotifPolling` on login/sign-out) also detects revoked access via `applyWorkspaces()`
+- Share modal (owner only): "Awaiting response" (Cancel) + "Members" (Remove) lists → `/api/workspaces/members`
+- Email-verification gate: `login-card`/`verify-card` on auth screen (M6)
 - Legacy-import prompt and `maybeOfferLegacyImport()` REMOVED in M5 — empty workspace just starts fresh
 - `loadData()/btn-save/btn-load` pass `?ws=${S.wsId}`
 
@@ -117,9 +119,9 @@ All Firestore calls keep the existing pattern: user's ID token, urllib REST, `_p
   - app.py: `GET /api/workspaces` also returns `own.invites` + `invites:[{id,owner_email}]` (second runQuery on `invites` array-contains email); `POST /api/workspaces/members` add→`invites`, remove→both arrays; NEW `POST /api/invitations/respond` {ws_id, action} and `POST /api/workspaces/leave` {ws_id} (meta transition + notification doc); NEW `GET /api/notifications` (runQuery, created desc, limit 50) and `POST /api/notifications/read` (PATCH with `updateMask.fieldPaths=read`)
   - firestore.rules: meta get/list extended to invitees; self-service diff-validated update clauses; owner update may not change `owner_uid`/`owner_email`; `notifications/{uid}/items` block per D9
   - Pass (verified): 18/18 mocked-Firestore scenarios (meta auto-create with invites[]; invite add/dup-idempotent/existing-member-400; invitee pending discovery; accept→member+notification; decline; leave; owner revoke; notifications list/unread/mark-read; 400/404 paths incl. own-ws and bad ids). Rules Playground dry-run of accept/decline/leave transitions REQUIRED before M10 publish
-- **M8 — Invitations + notifications frontend** (L2)
+- **M8 — Invitations + notifications frontend — IMPLEMENTED 2026-06-10** (L2)
   - index.html: 🔔 bell + unread badge in header row 1; notifications modal (pending invites with Accept/Decline; notification list with mark-read); 60s poll; "Leave workspace" action when viewing a shared workspace (confirm → POST leave → switch to own ws, refresh switcher); Share modal split into Pending / Members lists with Cancel / Remove
-  - Pass: `node --check`, render test, element-id checks; manual flow on Render preview
+  - Pass (verified): node --check, element-id checks, render test (all new ids + endpoints present). Implementation notes: `applyWorkspaces()` preserves the active wsId across refreshes and detects revoked access (poll switches back to My Schedule + reloads); opening the bell marks unread as read (badge clears, highlights persist until close); polling starts on login, stops on sign-out. Live two-account flow deferred to M10 matrix
 - **M9 — UI review & alignment fixes** (L1)
   - Known issues found during planning: (1) BUG `renderSchedule`: `'#'+S.C.color_map[code]||'fff'` — precedence makes unknown codes render `#undefined`, should be `'#'+(S.C.color_map[code]||'fff')`; (2) hardcoded `hrs>160` red threshold ignores configurable `S.rules.max_hours`; (3) header row 1 crowding on ≤640px once bell is added (audit `ws-switch`/`ws-badge`/bell wrap behavior); (4) systematic pass over modals/header/sidebar at 360px/640px/900px/desktop widths
   - Pass: documented before/after list; render test; no horizontal overflow at audited widths
