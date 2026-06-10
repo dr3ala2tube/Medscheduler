@@ -1,6 +1,6 @@
 # PROJECT_MAP.md
 
-Last updated: 2026-06-10 — M1–M4 complete and live (web merged to `main`, deployed on Render `medscheduler-5io6.onrender.com`; desktop updated with workspace support). **NEW FEATURE CYCLE IN PROGRESS (M5–M10, approved; M5–M6 implemented):** remove legacy-import prompt, email verification for new signups, invitation accept/decline/leave with per-user notifications panel, UI alignment review.
+Last updated: 2026-06-10 — M1–M4 complete and live (web merged to `main`, deployed on Render `medscheduler-5io6.onrender.com`; desktop updated with workspace support). **NEW FEATURE CYCLE IN PROGRESS (M5–M10, approved; M5–M7 implemented):** remove legacy-import prompt, email verification for new signups, invitation accept/decline/leave with per-user notifications panel, UI alignment review.
 
 ## [TECH_STACK]
 
@@ -36,7 +36,7 @@ shared/schedule                            ← legacy doc; kept in Firestore as 
                                              unreachable after M5 rules (no block grants access)
 ```
 
-Planned additions (feature cycle 2):
+Additions implemented in M7 (rules publish pending at M10):
 ```
 workspaces/{ownerUid}.invites              ← array<string>, pending invitation emails (accepted → moved to members)
 
@@ -61,7 +61,7 @@ Feature cycle 2 (M7) will extend: invitee get/list via `invites`, diff-validated
 | `/api/data/import-legacy` | POST | **REMOVED in M5** (was one-time legacy migration) |
 | `/api/schedule`, `/api/summary`, `/api/export/*` | POST | stateless — operate on posted payload |
 
-Planned (feature cycle 2): `POST /api/invitations/respond`, `POST /api/workspaces/leave`, `GET /api/notifications`, `POST /api/notifications/read`; `GET /api/workspaces` extended with pending invites; `POST /api/workspaces/members` add targets `invites`.
+Implemented in M7: `POST /api/invitations/respond` (accept/decline, notifies owner), `POST /api/workspaces/leave` (notifies owner), `GET /api/notifications` (newest-first, unread count), `POST /api/notifications/read` (ids, best-effort); `GET /api/workspaces` now returns `own.invites` + pending `invites` list; `POST /api/workspaces/members` add→`invites`, remove→both arrays. New helpers: `fs_create`, `fs_patch_fields` (updateMask + exists precondition), `fs_query_notifications`, `_notify` (best-effort, never rolls back the membership change).
 
 All Firestore calls keep the existing pattern: user's ID token, urllib REST, `_py_to_fs`/`_fs_to_py`. Enforcement lives in Firestore rules, not in Flask — Flask never holds elevated credentials.
 
@@ -113,10 +113,10 @@ All Firestore calls keep the existing pattern: user's ID token, urllib REST, `_p
   - index.html: after `createUserWithEmailAndPassword` → `sendEmailVerification()` → verify screen (resend + "I've verified" + sign-out); same gate on sign-in when `!user.emailVerified` and `user.metadata.creationTime >= cutoff`
   - app.py: `VERIFICATION_CUTOFF` constant (deploy date, epoch ms); `require_auth` returns 403 `email-not-verified` when `createdAt >= cutoff and not emailVerified`
   - Pass (verified): mocked require_auth matrix — new+unverified 403 `email-not-verified`, new+verified 200, pre-cutoff unverified 200, missing createdAt 200, no token 401; node --check; render test (verify card + cutoff present). Cutoff = 1781049600000 (2026-06-10T00:00:00Z), identical in app.py and index.html. Live email-delivery check deferred to M10 matrix
-- **M7 — Invitations backend + rules** (L3)
+- **M7 — Invitations backend + rules — IMPLEMENTED 2026-06-10** (L3)
   - app.py: `GET /api/workspaces` also returns `own.invites` + `invites:[{id,owner_email}]` (second runQuery on `invites` array-contains email); `POST /api/workspaces/members` add→`invites`, remove→both arrays; NEW `POST /api/invitations/respond` {ws_id, action} and `POST /api/workspaces/leave` {ws_id} (meta transition + notification doc); NEW `GET /api/notifications` (runQuery, created desc, limit 50) and `POST /api/notifications/read` (PATCH with `updateMask.fieldPaths=read`)
   - firestore.rules: meta get/list extended to invitees; self-service diff-validated update clauses; owner update may not change `owner_uid`/`owner_email`; `notifications/{uid}/items` block per D9
-  - Pass: mocked-Firestore scenario tests (invite→accept→member edit; decline; leave; revoke pending; notification create/read/mark-read; non-member 403s); rules reviewed in Firebase console rules playground before publish
+  - Pass (verified): 18/18 mocked-Firestore scenarios (meta auto-create with invites[]; invite add/dup-idempotent/existing-member-400; invitee pending discovery; accept→member+notification; decline; leave; owner revoke; notifications list/unread/mark-read; 400/404 paths incl. own-ws and bad ids). Rules Playground dry-run of accept/decline/leave transitions REQUIRED before M10 publish
 - **M8 — Invitations + notifications frontend** (L2)
   - index.html: 🔔 bell + unread badge in header row 1; notifications modal (pending invites with Accept/Decline; notification list with mark-read); 60s poll; "Leave workspace" action when viewing a shared workspace (confirm → POST leave → switch to own ws, refresh switcher); Share modal split into Pending / Members lists with Cancel / Remove
   - Pass: `node --check`, render test, element-id checks; manual flow on Render preview

@@ -2,11 +2,16 @@
 // Deploy manually: Firebase Console → Firestore Database → Rules → paste → Publish.
 // BEFORE publishing, copy the currently published rules somewhere safe
 // (Console keeps a rules history, which is the rollback path).
+// RECOMMENDED: dry-run the transition cases in the Console Rules Playground
+// before publishing (see M7 notes in PROJECT_MAP.md).
 //
 // Model:
 //   workspaces/{wsId}                — meta/ACL doc; wsId == owner's Firebase uid
-//                                      fields: owner_uid, owner_email, members (array of lowercase emails)
-//   workspaces/{wsId}/data/schedule  — schedule payload
+//                                      fields: owner_uid, owner_email,
+//                                              members (accepted, lowercase emails),
+//                                              invites (pending,  lowercase emails)
+//   workspaces/{wsId}/data/schedule  — schedule payload (members + owner only)
+//   notifications/{uid}/items/{id}   — per-user notification feed
 //
 // The legacy team-wide doc (shared/schedule) remains in Firestore as an
 // untouched backup but is no longer reachable: no rules block grants access.
@@ -16,30 +21,107 @@ service cloud.firestore {
   match /databases/{database}/documents {
 
     match /workspaces/{wsId} {
+
+      function myEmail() {
+        return request.auth.token.email;
+      }
+      function oldMembers() {
+        return resource.data.get('members', []);
+      }
+      function newMembers() {
+        return request.resource.data.get('members', []);
+      }
+      function oldInvites() {
+        return resource.data.get('invites', []);
+      }
+      function newInvites() {
+        return request.resource.data.get('invites', []);
+      }
+      // Identity fields can never change after creation.
+      function identityUnchanged() {
+        return request.resource.data.owner_uid == resource.data.owner_uid
+            && request.resource.data.owner_email == resource.data.owner_email;
+      }
+      // Non-owner updates: only members/invites may change, and the only
+      // permitted changes are the caller moving/removing their OWN email.
+      function selfServiceTransition() {
+        return request.resource.data.diff(resource.data)
+                 .affectedKeys().hasOnly(['members', 'invites'])
+            && (acceptTransition() || declineTransition() || leaveTransition());
+      }
+      // accept: my email leaves invites and joins members; nothing else moves
+      function acceptTransition() {
+        return myEmail() in oldInvites()
+            && !(myEmail() in oldMembers())
+            && newInvites().toSet() == oldInvites().toSet().difference([myEmail()].toSet())
+            && newMembers().toSet() == oldMembers().toSet().union([myEmail()].toSet());
+      }
+      // decline: my email leaves invites; members untouched
+      function declineTransition() {
+        return myEmail() in oldInvites()
+            && newInvites().toSet() == oldInvites().toSet().difference([myEmail()].toSet())
+            && newMembers().toSet() == oldMembers().toSet();
+      }
+      // leave: my email leaves members; invites untouched
+      function leaveTransition() {
+        return myEmail() in oldMembers()
+            && newMembers().toSet() == oldMembers().toSet().difference([myEmail()].toSet())
+            && newInvites().toSet() == oldInvites().toSet();
+      }
+
       // Owner creates their own meta doc (first login)
       allow create: if request.auth != null
                     && request.auth.uid == wsId
                     && request.resource.data.owner_uid == request.auth.uid;
 
-      // Owner or an invited member can read the meta doc
+      // Owner, accepted member, or invitee can read the meta doc
       allow get: if request.auth != null
                  && (request.auth.uid == wsId
-                     || request.auth.token.email in resource.data.members);
+                     || myEmail() in oldMembers()
+                     || myEmail() in oldInvites());
 
-      // "Workspaces shared with me" query (must filter members array-contains own email)
+      // Queries: "shared with me" (members) / "pending invites" (invites) —
+      // both constrained to the caller's own email by the query filter
       allow list: if request.auth != null
-                  && request.auth.token.email in resource.data.members;
+                  && (myEmail() in oldMembers() || myEmail() in oldInvites());
 
-      // Only the owner can change membership or delete the workspace
-      allow update, delete: if request.auth != null && request.auth.uid == wsId;
+      // Owner may edit membership (identity fields frozen); any signed-in
+      // user may perform a strict self-service transition on their own email
+      allow update: if request.auth != null
+                    && identityUnchanged()
+                    && (request.auth.uid == wsId || selfServiceTransition());
 
-      // Schedule payload: owner or invited member, full read/write
+      // Only the owner can delete the workspace
+      allow delete: if request.auth != null && request.auth.uid == wsId;
+
+      // Schedule payload: owner or ACCEPTED member (invitees excluded)
       match /data/schedule {
         allow read, write: if request.auth != null
           && (request.auth.uid == wsId
               || request.auth.token.email in
                  get(/databases/$(database)/documents/workspaces/$(wsId)).data.members);
       }
+    }
+
+    // Per-user notification feed.
+    match /notifications/{uid}/items/{itemId} {
+      // Any signed-in user may create a notification for someone else, but
+      // the payload is strictly validated and must name the actor truthfully.
+      allow create: if request.auth != null
+        && request.resource.data.keys().hasOnly(['type', 'actor_email', 'ws_id', 'created', 'read'])
+        && request.resource.data.type in ['invite_accepted', 'invite_declined', 'member_left']
+        && request.resource.data.actor_email == request.auth.token.email
+        && request.resource.data.ws_id is string
+        && request.resource.data.created is string
+        && request.resource.data.read == false;
+
+      // Only the recipient can read, list, or delete their notifications
+      allow get, list, delete: if request.auth != null && request.auth.uid == uid;
+
+      // Recipient may only flip the read flag
+      allow update: if request.auth != null && request.auth.uid == uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read'])
+        && request.resource.data.read is bool;
     }
   }
 }
