@@ -46,7 +46,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(
 /* ── Header ────────────────────────────────────────────────────── */
 header{background:var(--primary);color:#fff;display:flex;flex-direction:column;flex-shrink:0;box-shadow:0 2px 8px rgba(0,0,0,.2)}
 .hdr-row1{display:flex;align-items:center;padding:0 14px;height:46px;gap:10px}
-.hdr-row2{display:flex;align-items:center;padding:0 14px;height:40px;gap:6px;background:rgba(0,0,0,.12);flex-wrap:wrap;overflow:hidden}
+.hdr-row2{display:flex;align-items:center;padding:0 14px;height:40px;gap:6px;background:rgba(0,0,0,.12);flex-wrap:nowrap;overflow-x:auto;overflow-y:hidden;scrollbar-width:thin}
 .logo{font-weight:800;font-size:1.1rem;letter-spacing:-.02em}
 .month-nav{display:flex;align-items:center;gap:6px;background:rgba(255,255,255,.15);border-radius:8px;padding:4px 10px}
 .month-nav button{background:none;border:none;color:#fff;font-size:1.1rem;cursor:pointer;line-height:1;padding:2px 4px;border-radius:4px}
@@ -260,8 +260,9 @@ table.summary .high{color:var(--danger);font-weight:700}
   .auth-card{width:calc(100vw - 32px);padding:26px 18px}
   .auth-logo{font-size:1.7rem}
 
-  /* Header row 1 */
-  .hdr-row1{height:44px;padding:0 8px;gap:6px}
+  /* Header row 1: scroll instead of clip when crowded */
+  .hdr-row1{height:44px;padding:0 8px;gap:6px;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+  .hdr-row1::-webkit-scrollbar{display:none}
   #btn-toggle-sidebar{display:flex}
   .logo{font-size:.9rem}
   #user-email-lbl{display:none}
@@ -294,6 +295,14 @@ table.summary .high{color:var(--danger);font-weight:700}
 
   /* Status bar */
   .statusbar{font-size:.72rem;padding:3px 10px}
+
+  /* Workspace switcher: cap width; badge is redundant with the select */
+  #ws-select{max-width:110px}
+  #ws-badge{display:none!important}
+  #btn-leave-ws{font-size:.68rem;padding:3px 7px;height:24px}
+
+  /* Touch devices have no hover — keep physician delete buttons visible */
+  .doc-del{opacity:1}
 }
 </style>
 </head>
@@ -1443,14 +1452,15 @@ function renderSchedule(){
     let hrs=0;
     for(let d=1;d<=td;d++) hrs+=(S.C.shifts[getAsgn(ph.id,d)]?.h||0);
     const tdHrs=document.createElement('td'); tdHrs.className='col-hrs';
-    tdHrs.textContent=hrs; if(hrs>160) tdHrs.style.color='#dc2626'; tr.appendChild(tdHrs);
+    const maxHrs=(S.rules&&S.rules.max_hours)||DEFAULT_RULES.max_hours;
+    tdHrs.textContent=hrs; if(hrs>maxHrs) tdHrs.style.color='var(--danger)'; tr.appendChild(tdHrs);
     // Day cells
     for(let d=1;d<=td;d++){
       const code=getAsgn(ph.id,d);
       const td2=document.createElement('td');
       td2.className='day-cell'+(isWeekend(S.yr,S.mo,d)?' weekend-row':'');
       td2.textContent=S.C.shifts[code]?.short||'';
-      td2.style.background='#'+S.C.color_map[code]||'fff';
+      td2.style.background='#'+(S.C.color_map[code]||'fff');
       td2.dataset.pid=ph.id; td2.dataset.day=d;
       td2.onclick=openCellEdit;
       tr.appendChild(td2);
@@ -1624,7 +1634,7 @@ async function renderSummary(){
       cols.forEach(c=>{
         const td=document.createElement('td');
         td.textContent=row[c]??'';
-        if(c==='total'&&row[c]>160) td.className='high';
+        if(c==='total'&&row[c]>((S.rules&&S.rules.max_hours)||DEFAULT_RULES.max_hours)) td.className='high';
         tr.appendChild(td);
       });
       tbody.appendChild(tr);

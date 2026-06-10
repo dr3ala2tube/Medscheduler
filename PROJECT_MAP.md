@@ -1,6 +1,6 @@
 # PROJECT_MAP.md
 
-Last updated: 2026-06-10 — M1–M4 complete and live (web merged to `main`, deployed on Render `medscheduler-5io6.onrender.com`; desktop updated with workspace support). **NEW FEATURE CYCLE IN PROGRESS (M5–M10, approved; M5–M8 implemented):** remove legacy-import prompt, email verification for new signups, invitation accept/decline/leave with per-user notifications panel, UI alignment review.
+Last updated: 2026-06-10 — M1–M4 complete and live (web merged to `main`, deployed on Render `medscheduler-5io6.onrender.com`; desktop updated with workspace support). **NEW FEATURE CYCLE IN PROGRESS (M5–M10, approved; M5–M9 implemented — only M10 (verify+deploy) remains):** remove legacy-import prompt, email verification for new signups, invitation accept/decline/leave with per-user notifications panel, UI alignment review.
 
 ## [TECH_STACK]
 
@@ -122,9 +122,10 @@ All Firestore calls keep the existing pattern: user's ID token, urllib REST, `_p
 - **M8 — Invitations + notifications frontend — IMPLEMENTED 2026-06-10** (L2)
   - index.html: 🔔 bell + unread badge in header row 1; notifications modal (pending invites with Accept/Decline; notification list with mark-read); 60s poll; "Leave workspace" action when viewing a shared workspace (confirm → POST leave → switch to own ws, refresh switcher); Share modal split into Pending / Members lists with Cancel / Remove
   - Pass (verified): node --check, element-id checks, render test (all new ids + endpoints present). Implementation notes: `applyWorkspaces()` preserves the active wsId across refreshes and detects revoked access (poll switches back to My Schedule + reloads); opening the bell marks unread as read (badge clears, highlights persist until close); polling starts on login, stops on sign-out. Live two-account flow deferred to M10 matrix
-- **M9 — UI review & alignment fixes** (L1)
+- **M9 — UI review & alignment fixes — IMPLEMENTED 2026-06-10** (L1)
   - Known issues found during planning: (1) BUG `renderSchedule`: `'#'+S.C.color_map[code]||'fff'` — precedence makes unknown codes render `#undefined`, should be `'#'+(S.C.color_map[code]||'fff')`; (2) hardcoded `hrs>160` red threshold ignores configurable `S.rules.max_hours`; (3) header row 1 crowding on ≤640px once bell is added (audit `ws-switch`/`ws-badge`/bell wrap behavior); (4) systematic pass over modals/header/sidebar at 360px/640px/900px/desktop widths
-  - Pass: documented before/after list; render test; no horizontal overflow at audited widths
+  - Fixed (before → after): (1) unknown shift codes rendered background `#undefined` → `'#'+(map[code]||'fff')`; (2) grid Hrs column + Summary red threshold hardcoded `>160` → follows configurable `S.rules.max_hours`; (3) `.hdr-row2` used flex-wrap + `overflow:hidden`, silently CLIPPING action buttons at ~901–1150px widths → nowrap + horizontal scroll at all widths; (4) header row 1 could overflow at ≤640px with switcher+Leave+bell → row scrolls, `#ws-select` capped 110px, redundant `#ws-badge` hidden, compact Leave; (5) `.doc-del` was hover-revealed (opacity:0) → always visible on touch widths
+  - Pass: node --check, render test; live spot-check at 360/640/900px in M10 matrix
 - **M10 — V3 verification + deploy + docs**
   - Deploy branch to Render preview → live matrix (signup+verify, invite accept/decline/leave both sides, notifications, legacy prompt gone, UI spot-checks) → publish rules (old rules saved first) → merge to main on approval → update PROJECT_STATE.md
   - Rollback: restore prior rules from Console history; revert merge; `VERIFICATION_CUTOFF` removal restores old auth behavior; `invites` arrays are additive (old code ignores them); legacy doc untouched
