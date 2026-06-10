@@ -133,6 +133,9 @@ table.schedule td.col-team{font-size:.7rem;font-weight:700}
 table.schedule td.col-hrs{color:var(--muted);font-size:.76rem}
 table.schedule td.day-cell{cursor:pointer;height:30px;font-size:.76rem;font-weight:600;transition:opacity .1s}
 table.schedule td.day-cell:hover{opacity:.75;outline:2px solid var(--primary);outline-offset:-2px}
+table.schedule td.day-cell.cell-conflict{outline:2px dashed var(--danger);outline-offset:-2px}
+#conflict-chip{display:none;background:var(--danger);border-color:var(--danger);color:#fff}
+#conflict-chip.on{display:inline-block}
 table.schedule th.weekend{background:#fef9c3;color:#92400e}
 table.schedule td.weekend-row{background:#fffbeb!important}
 table.schedule tr:hover td:not(.sticky-col){filter:brightness(.95)}
@@ -363,6 +366,7 @@ table.summary .high{color:var(--danger);font-weight:700}
       <button class="hdr-btn" id="btn-leave">📅 Annual Leave</button>
       <button class="hdr-btn" id="btn-block">🚫 Block Specialty</button>
       <button class="hdr-btn" id="btn-manual">📌 Manual Assign</button>
+      <button class="hdr-btn" id="conflict-chip" title="Scheduling conflicts — click for details">⚠ 0</button>
       <div class="hdr-sep"></div>
       <button class="hdr-btn" id="btn-export-rota">📥 Export Rota</button>
       <button class="hdr-btn" id="btn-export-full">📥 Export Full</button>
@@ -370,6 +374,7 @@ table.summary .high{color:var(--danger);font-weight:700}
       <button class="hdr-btn" id="btn-save">☁ Save</button>
       <button class="hdr-btn" id="btn-load">⬇ Load</button>
       <button class="hdr-btn" id="btn-share">👥 Share</button>
+      <button class="hdr-btn" id="btn-history">📜 History</button>
       <div class="hdr-sep"></div>
       <button class="hdr-btn" id="undoBtn" type="button" disabled>↶ Undo</button>
       <button class="hdr-btn" id="redoBtn" type="button" disabled>↷ Redo</button>
@@ -446,6 +451,35 @@ table.summary .high{color:var(--danger);font-weight:700}
     <div class="modal-footer">
       <button class="btn-cancel" id="cell-cancel">Cancel</button>
       <button class="btn-ok" id="cell-ok">Apply</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── History Modal ───────────────────────────────────────────── -->
+<div class="modal-overlay" id="history-modal" style="display:none">
+  <div class="modal">
+    <h2>📜 Schedule History</h2>
+    <div style="font-size:.85rem;color:var(--muted);margin-bottom:8px">
+      Who changed what, when — recorded on every cloud save (latest 50, web saves only).
+    </div>
+    <div id="history-list" style="max-height:55vh;overflow:auto"></div>
+    <div class="modal-footer">
+      <button class="btn-cancel" id="history-close">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Conflicts Modal ─────────────────────────────────────────── -->
+<div class="modal-overlay" id="conflict-modal" style="display:none">
+  <div class="modal">
+    <h2>⚠️ Scheduling Conflicts</h2>
+    <div style="font-size:.85rem;color:var(--muted);margin-bottom:8px">
+      A single-slot shift (duty or clinic) is assigned to more than one physician on the same day.
+      Conflicts never block saving — resolve them by reassigning one of the physicians.
+    </div>
+    <div id="conflict-list" style="max-height:50vh;overflow:auto"></div>
+    <div class="modal-footer">
+      <button class="btn-cancel" id="conflict-close">Close</button>
     </div>
   </div>
 </div>
@@ -838,6 +872,52 @@ const p2 = n  => String(n).padStart(2,'0');
 const ak = (pid,d)=> `${pid}|${S.yr}|${S.mo}|${d}`;
 const getAsgn = (pid,d)=> S.asgn[ak(pid,d)] || '_';
 const setAsgn = (pid,d,v)=>{ S.asgn[ak(pid,d)]=v; };
+
+// ── Conflict detection (D11): duplicate single-slot shifts ─────────
+// Single-slot codes = duty types + enabled clinics (the scheduler fills
+// exactly one physician per such code per day). Conflicts are DERIVED
+// data: recomputed from S.asgn, never persisted.
+function singleSlotCodes(){
+  return new Set([...((S.C&&S.C.duty_set)||[]), ...((S.C&&S.C.clinic_set)||[])]);
+}
+function computeConflicts(){
+  const single=singleSlotCodes();
+  const td=dim(S.yr,S.mo);
+  const byDayCode={};                   // day -> code -> [pid,...]
+  S.docs.forEach(ph=>{
+    for(let d=1;d<=td;d++){
+      const code=getAsgn(ph.id,d);
+      if(!single.has(code)) continue;
+      if(!byDayCode[d]) byDayCode[d]={};
+      if(!byDayCode[d][code]) byDayCode[d][code]=[];
+      byDayCode[d][code].push(ph.id);
+    }
+  });
+  const list=[];                        // [{day, code, pids}]
+  const cells=new Set();                // "pid|day" of involved cells
+  Object.keys(byDayCode).map(Number).sort((a,b)=>a-b).forEach(d=>{
+    Object.keys(byDayCode[d]).sort().forEach(code=>{
+      const pids=byDayCode[d][code];
+      if(pids.length>1){
+        list.push({day:d,code,pids});
+        pids.forEach(pid=>cells.add(pid+'|'+d));
+      }
+    });
+  });
+  return {list,cells};
+}
+function conflictCreatedBy(pid,day,code){
+  // Physicians (other than pid) already holding single-slot `code` on `day`
+  if(!singleSlotCodes().has(code)) return null;
+  const others=S.docs.filter(p=>p.id!==pid && getAsgn(p.id,day)===code);
+  return others.length?others:null;
+}
+function updateConflictChip(res){
+  const chip=$('conflict-chip'); if(!chip) return;
+  const n=(res||computeConflicts()).list.length;
+  chip.textContent='⚠ '+n;
+  chip.classList.toggle('on',n>0);
+}
 
 function dim(y,m){ // days in month (m=0-indexed)
   return new Date(y, m+1, 0).getDate();
@@ -1337,7 +1417,14 @@ function serializeState(){
 
 $('btn-save').onclick = async()=>{
   $('btn-save').disabled=true; $('btn-save').innerHTML='<span class="spinner"></span>Saving…';
-  try { await api('POST','/api/data'+wsQuery(),serializeState()); toast('✓ Saved to cloud'); }
+  try {
+    const res=await api('POST','/api/data'+wsQuery(),serializeState());
+    const n=computeConflicts().list.length;
+    let msg=n?('⚠ Saved to cloud — '+n+' scheduling conflict'+(n>1?'s':'')):'✓ Saved to cloud';
+    const noAudit=!!(res&&res.audited===false);
+    if(noAudit) msg+=' — history entry could not be recorded';
+    toast(msg,(n>0||noAudit)?4200:2800);
+  }
   catch(e){ toast('Save failed: '+e.message,4000); }
   finally { $('btn-save').disabled=false; $('btn-save').textContent='☁ Save'; }
 };
@@ -1440,6 +1527,7 @@ function renderSchedule(){
   }
 
   // Rows
+  const _conf=computeConflicts();
   S.docs.forEach(ph=>{
     const tr=document.createElement('tr');
     // Name cell
@@ -1462,11 +1550,13 @@ function renderSchedule(){
       td2.textContent=S.C.shifts[code]?.short||'';
       td2.style.background='#'+(S.C.color_map[code]||'fff');
       td2.dataset.pid=ph.id; td2.dataset.day=d;
+      if(_conf.cells.has(ph.id+'|'+d)) td2.classList.add('cell-conflict');
       td2.onclick=openCellEdit;
       tr.appendChild(td2);
     }
     body.appendChild(tr);
   });
+  updateConflictChip(_conf);
 }
 
 // ── Cell edit ──────────────────────────────────────────────────────
@@ -1483,10 +1573,21 @@ function openCellEdit(e){
 $('cell-ok').onclick=()=>{
   const {pid,day}=S.editing;
   const code=$('cell-code').value;
+  const others=conflictCreatedBy(pid,day,code);
+  if(others && !S.editing.conflictWarned){
+    S.editing.conflictWarned=true;
+    const names=others.map(p=>p.name).join(', ');
+    $('cell-err').textContent='⚠ '+((S.C.shifts[code]||{}).label||code)+' on day '+day+' is already assigned to '+names+'. Click Apply again to keep both.';
+    return;
+  }
   if(getAsgn(pid,day)!==code) pushUndoState();
   setAsgn(pid,day,code);
   $('cell-modal').style.display='none';
   renderSchedule();
+};
+$('cell-code').onchange=()=>{
+  if(S.editing) S.editing.conflictWarned=false;
+  $('cell-err').textContent='';
 };
 $('cell-cancel').onclick=()=>{ $('cell-modal').style.display='none'; };
 
@@ -1583,6 +1684,7 @@ function renderBlockList(){
 // ── Manual Assign modal ───────────────────────────────────────────
 $('btn-manual').onclick=()=>{ renderManualList(); $('manual-modal').style.display='flex'; };
 $('manual-close').onclick=()=>{ $('manual-modal').style.display='none'; };
+let manualWarnKey=null;
 $('manual-add-btn').onclick=()=>{
   const pid=+$('manual-doc').value;
   const code=$('manual-code').value;
@@ -1591,6 +1693,14 @@ $('manual-add-btn').onclick=()=>{
   if(!pid||!code||day<1||day>td){ $('manual-err').textContent='Invalid input.'; return; }
   const existing=getAsgn(pid,day);
   if(existing!=='_'&&existing!=='O'){ $('manual-err').textContent=`Day ${day} already assigned: ${existing}`; return; }
+  const others=conflictCreatedBy(pid,day,code);
+  const wk=pid+'|'+day+'|'+code;
+  if(others && manualWarnKey!==wk){
+    manualWarnKey=wk;
+    $('manual-err').textContent='⚠ '+code+' on day '+day+' is already assigned to '+others.map(p=>p.name).join(', ')+'. Click again to keep both.';
+    return;
+  }
+  manualWarnKey=null;
   pushUndoState();
   S.manual_asgns.push({id:S.next_manual_id++,pid,code,day});
   setAsgn(pid,day,code);
@@ -2107,8 +2217,93 @@ $('shifts-reset').onclick = () => {
 
 $('btn-shifts').onclick = openShiftsModal;
 
+// ── Conflicts modal ─────────────────────────────────
+$('conflict-chip').onclick=()=>{
+  const res=computeConflicts();
+  const div=$('conflict-list'); div.innerHTML='';
+  if(!res.list.length){
+    const d=document.createElement('div');
+    d.style.cssText='color:var(--muted);font-size:.85rem';
+    d.textContent='No conflicts.'; div.appendChild(d);
+  }
+  res.list.forEach(c=>{
+    const names=c.pids.map(pid=>{const p=S.docs.find(x=>x.id===pid); return p?p.name:('#'+pid);}).join(', ');
+    const row=document.createElement('div');
+    row.style.cssText='padding:6px 9px;border:1px solid var(--border);border-left:3px solid var(--danger);border-radius:6px;margin-bottom:6px;font-size:.85rem';
+    row.textContent='Day '+c.day+' ('+DN[dow(S.yr,S.mo,c.day)]+') — '+c.code+' ('+((S.C.shifts[c.code]||{}).label||c.code)+'): '+names;
+    div.appendChild(row);
+  });
+  $('conflict-modal').style.display='flex';
+};
+$('conflict-close').onclick=()=>{ $('conflict-modal').style.display='none'; };
+
+// ── History modal (audit trail, D12/D13) ────────────
+function relTime(iso){
+  const t=Date.parse(iso); if(isNaN(t)) return iso||'';
+  const s=Math.floor((Date.now()-t)/1000);
+  if(s<60) return 'just now';
+  if(s<3600) return Math.floor(s/60)+' min ago';
+  if(s<86400) return Math.floor(s/3600)+' h ago';
+  if(s<604800) return Math.floor(s/86400)+' d ago';
+  return new Date(t).toLocaleDateString();
+}
+$('btn-history').onclick=async()=>{
+  const div=$('history-list'); div.innerHTML='';
+  const note=document.createElement('div');
+  note.style.cssText='color:var(--muted);font-size:.85rem';
+  note.textContent='Loading…'; div.appendChild(note);
+  $('history-modal').style.display='flex';
+  try{
+    const res=await api('GET','/api/audit'+wsQuery());
+    div.innerHTML='';
+    const items=(res&&res.items)||[];
+    if(!items.length){
+      const e=document.createElement('div');
+      e.style.cssText='color:var(--muted);font-size:.85rem';
+      e.textContent='No history yet — an entry is recorded on every cloud save.';
+      div.appendChild(e); return;
+    }
+    items.forEach(it=>{
+      const box=document.createElement('details');
+      box.style.cssText='border:1px solid var(--border);border-radius:6px;margin-bottom:6px;padding:6px 9px;font-size:.85rem';
+      const sum=document.createElement('summary');
+      sum.style.cssText='cursor:pointer';
+      const who=document.createElement('b'); who.textContent=it.actor_email||'?';
+      const when=document.createElement('span');
+      when.style.cssText='color:var(--muted);font-size:.78rem;margin:0 6px';
+      when.textContent=relTime(it.created); when.title=it.created||'';
+      const what=document.createElement('span'); what.textContent=it.summary||'';
+      sum.appendChild(who); sum.appendChild(when); sum.appendChild(what);
+      box.appendChild(sum);
+      const body=document.createElement('div');
+      body.style.cssText='margin-top:6px;padding-left:14px';
+      const changes=it.changes||[];
+      if(changes.length){
+        changes.forEach(c=>{
+          const line=document.createElement('div');
+          line.style.cssText='font-size:.8rem;padding:1px 0';
+          line.textContent=c; body.appendChild(line);
+        });
+      } else {
+        const line=document.createElement('div');
+        line.style.cssText='font-size:.8rem;color:var(--muted)';
+        line.textContent='(no line-level details)'; body.appendChild(line);
+      }
+      box.appendChild(body);
+      div.appendChild(box);
+    });
+  }catch(e){
+    div.innerHTML='';
+    const err=document.createElement('div');
+    err.style.cssText='color:var(--danger);font-size:.85rem';
+    err.textContent='Could not load history: '+e.message;
+    div.appendChild(err);
+  }
+};
+$('history-close').onclick=()=>{ $('history-modal').style.display='none'; };
+
 // ── Close modals on overlay click ─────────────────
-['cell-modal','leave-modal','block-modal','manual-modal','rules-modal','shifts-modal','notif-modal'].forEach(id=>{
+['cell-modal','leave-modal','block-modal','manual-modal','rules-modal','shifts-modal','notif-modal','conflict-modal','history-modal'].forEach(id=>{
   $(id).addEventListener('click',e=>{ if(e.target===$(id)) $(id).style.display='none'; });
 });
 

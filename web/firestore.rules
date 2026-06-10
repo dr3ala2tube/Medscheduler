@@ -12,6 +12,7 @@
 //                                              invites (pending,  lowercase emails)
 //   workspaces/{wsId}/data/schedule  — schedule payload (members + owner only)
 //   notifications/{uid}/items/{id}   — per-user notification feed
+//   workspaces/{wsId}/audit/{entryId} — immutable audit trail (who changed what, when)
 //
 // The legacy team-wide doc (shared/schedule) remains in Firestore as an
 // untouched backup but is no longer reachable: no rules block grants access.
@@ -100,6 +101,28 @@ service cloud.firestore {
           && (request.auth.uid == wsId
               || request.auth.token.email in
                  get(/databases/$(database)/documents/workspaces/$(wsId)).data.members);
+      }
+
+      // Audit trail (cycle 3, D12/D13): owner or accepted member may APPEND
+      // entries naming themselves as actor and may read the history.
+      // Nobody — owner included — may edit or delete an entry: history is
+      // immutable. No update/delete clause = denied by default.
+      match /audit/{entryId} {
+        function canUseAudit() {
+          return request.auth != null
+            && (request.auth.uid == wsId
+                || request.auth.token.email in
+                   get(/databases/$(database)/documents/workspaces/$(wsId)).data.members);
+        }
+
+        allow create: if canUseAudit()
+          && request.resource.data.keys().hasOnly(['actor_email', 'created', 'summary', 'changes'])
+          && request.resource.data.actor_email == request.auth.token.email
+          && request.resource.data.created is string
+          && request.resource.data.summary is string
+          && request.resource.data.changes is list;
+
+        allow get, list: if canUseAudit();
       }
     }
 

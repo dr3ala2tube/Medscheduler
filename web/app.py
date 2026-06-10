@@ -52,6 +52,10 @@ def ws_data_url(ws_id: str) -> str:
     """Workspace schedule payload document."""
     return f"{FIRESTORE_BASE}/workspaces/{ws_id}/data/schedule"
 
+def ws_audit_parent_url(ws_id: str) -> str:
+    """Parent collection for a workspace's audit-trail entries (D12)."""
+    return f"{FIRESTORE_BASE}/workspaces/{ws_id}/audit"
+
 app = Flask(__name__)
 app.config["JSON_SORT_KEYS"] = False
 
@@ -204,6 +208,33 @@ def fs_query_notifications(id_token: str, uid: str, limit: int = 50) -> List[Dic
         }
     }).encode()
     data = _http_json("POST", f"{FIRESTORE_BASE}/notifications/{uid}:runQuery",
+                      body=body,
+                      headers={"Authorization": f"Bearer {id_token}"}, timeout=20)
+    if isinstance(data, dict) and "error" in data:
+        code = data["error"].get("code", 0)
+        raise FsError(code, data["error"].get("message", "Firestore query error"))
+    items = []
+    for item in (data if isinstance(data, list) else []):
+        doc = item.get("document")
+        if not doc:
+            continue
+        fields = _fs_to_py({"mapValue": {"fields": doc.get("fields", {})}})
+        fields["id"] = doc["name"].rsplit("/", 1)[-1]
+        items.append(fields)
+    return items
+
+
+def fs_query_audit(id_token: str, ws_id: str, limit: int = 50) -> List[Dict]:
+    """Return a workspace's audit entries, newest first."""
+    body = json.dumps({
+        "structuredQuery": {
+            "from": [{"collectionId": "audit"}],
+            "orderBy": [{"field": {"fieldPath": "created"},
+                         "direction": "DESCENDING"}],
+            "limit": limit,
+        }
+    }).encode()
+    data = _http_json("POST", f"{FIRESTORE_BASE}/workspaces/{ws_id}:runQuery",
                       body=body,
                       headers={"Authorization": f"Bearer {id_token}"}, timeout=20)
     if isinstance(data, dict) and "error" in data:
@@ -526,6 +557,168 @@ def api_load(token, user):
     return jsonify({"data": data, "ws": ws})
 
 
+# ── Audit trail (cycle 3, D12) ────────────────────────────────────────────────────
+
+AUDIT_MAX_LINES = 300
+
+
+def _audit_doc_names(payload: Optional[Dict]) -> Dict[str, str]:
+    """pid (as str) -> physician display name, from a payload's docs list."""
+    names = {}
+    for d in (payload or {}).get("docs") or []:
+        if isinstance(d, dict) and d.get("id") is not None:
+            names[str(d["id"])] = str(d.get("name") or "#" + str(d["id"]))
+    return names
+
+
+def compute_audit_diff(old: Optional[Dict], new: Dict) -> Optional[Dict]:
+    """Compact human-readable diff between two schedule payloads.
+
+    Returns {"summary": str, "changes": [str, ...]}, or None when the
+    payloads are equivalent (no audit entry should be written).
+    Pure function: no I/O, no Firestore types.
+    """
+    if old is None:
+        return {"summary": "Initial snapshot", "changes": []}
+
+    changes: List[str] = []
+    cats: List[str] = []
+    names = {**_audit_doc_names(old), **_audit_doc_names(new)}
+
+    def nm(pid) -> str:
+        return names.get(str(pid), "#" + str(pid))
+
+    def count(n: int, word: str) -> str:
+        return f"{n} {word}" + ("" if n == 1 else "s")
+
+    # Displayed month switch (asgn keys are month-scoped, so this is separate)
+    if (old.get("yr"), old.get("mo")) != (new.get("yr"), new.get("mo")):
+        def _ym(p):
+            try:
+                return f"{int(p.get('yr'))}-{int(p.get('mo')) + 1:02d}"
+            except (TypeError, ValueError):
+                return "?"
+        changes.append(f"Month: {_ym(old)} → {_ym(new)}")
+        cats.append("month")
+
+    # Physicians
+    od = {str(d.get("id")): d for d in old.get("docs") or [] if isinstance(d, dict)}
+    nd = {str(d.get("id")): d for d in new.get("docs") or [] if isinstance(d, dict)}
+    def _idkey(x):
+        return (len(x), x)
+    n_doc = 0
+    for k in sorted(set(nd) - set(od), key=_idkey):
+        changes.append(f"Physician added: {nm(k)}"); n_doc += 1
+    for k in sorted(set(od) - set(nd), key=_idkey):
+        changes.append(f"Physician removed: {nm(k)}"); n_doc += 1
+    for k in sorted(set(od) & set(nd), key=_idkey):
+        if od[k] != nd[k]:
+            changes.append(f"Physician updated: {nm(k)}"); n_doc += 1
+    if n_doc:
+        cats.append(count(n_doc, "physician"))
+
+    # Cell assignments ("pid|y|m|d" -> code); blank and missing are equivalent
+    oa = old.get("asgn") or {}
+    na = new.get("asgn") or {}
+    def _akey(k):
+        p = str(k).split("|")
+        try:
+            return (int(p[1]), int(p[2]), int(p[3]), int(p[0]))
+        except (ValueError, IndexError):
+            return (0, 0, 0, 0)
+    n_asgn = 0
+    for k in sorted(set(oa) | set(na), key=_akey):
+        ov = oa.get(k) or "_"
+        nv = na.get(k) or "_"
+        if ov == nv:
+            continue
+        p = str(k).split("|")
+        if len(p) == 4:
+            try:
+                when = f"{int(p[1])}-{int(p[2]) + 1:02d}-{int(p[3]):02d}"
+            except ValueError:
+                when = str(k)
+            who = nm(p[0])
+        else:
+            when, who = str(k), "?"
+        changes.append(f"{who} {when}: {ov} → {nv}")
+        n_asgn += 1
+    if n_asgn:
+        cats.append(count(n_asgn, "assignment"))
+
+    # List sections compared as multisets of content keys (ids ignored)
+    def _list_delta(section, keyf, fmt, label):
+        oc, nc = {}, {}
+        for x in old.get(section) or []:
+            if isinstance(x, dict):
+                k = keyf(x); oc[k] = oc.get(k, 0) + 1
+        for x in new.get(section) or []:
+            if isinstance(x, dict):
+                k = keyf(x); nc[k] = nc.get(k, 0) + 1
+        n = 0
+        for k in sorted(set(oc) | set(nc)):
+            d = nc.get(k, 0) - oc.get(k, 0)
+            for _ in range(d):
+                changes.append(fmt("added", k)); n += 1
+            for _ in range(-d):
+                changes.append(fmt("removed", k)); n += 1
+        if n:
+            cats.append(count(n, label))
+
+    _list_delta("leaves",
+                lambda x: (str(x.get("pid")), str(x.get("f")), str(x.get("t"))),
+                lambda a, k: f"Leave {a}: {nm(k[0])} {k[1]} → {k[2]}",
+                "leave")
+    _list_delta("spec_blocks",
+                lambda x: (str(x.get("code")), str(x.get("f")), str(x.get("t"))),
+                lambda a, k: f"Specialty block {a}: {k[0]} {k[1]} → {k[2]}",
+                "specialty block")
+    _list_delta("manual_asgns",
+                lambda x: (str(x.get("pid")), str(x.get("code")), str(x.get("day"))),
+                lambda a, k: f"Manual assignment {a}: {nm(k[0])} day {k[2]} = {k[1]}",
+                "manual assignment")
+
+    # Rules (flat key -> value map)
+    orl = old.get("rules") or {}
+    nrl = new.get("rules") or {}
+    n_rules = 0
+    for k in sorted(set(orl) | set(nrl)):
+        if orl.get(k) != nrl.get(k):
+            changes.append(f"Rule {k}: {orl.get(k)} → {nrl.get(k)}")
+            n_rules += 1
+    if n_rules:
+        cats.append(count(n_rules, "rule"))
+
+    # Shift configuration (deep compare, single summary line)
+    if (old.get("shiftConfig") or {}) != (new.get("shiftConfig") or {}):
+        changes.append("Shift configuration changed")
+        cats.append("shift config")
+
+    if not changes:
+        return None
+    if len(changes) > AUDIT_MAX_LINES:
+        extra = len(changes) - AUDIT_MAX_LINES
+        changes = changes[:AUDIT_MAX_LINES]
+        changes.append(f"… and {count(extra, 'more change')}")
+    return {"summary": ", ".join(cats), "changes": changes}
+
+
+def _audit(token: str, ws_id: str, actor_email: str, entry: Dict) -> bool:
+    """Append an audit entry to the workspace history. Best-effort: returns
+    False instead of raising so a failed audit write never rolls back the
+    save it records (D12)."""
+    try:
+        fs_create(token, ws_audit_parent_url(ws_id), {
+            "actor_email": actor_email,
+            "created":     datetime.now(timezone.utc).isoformat(),
+            "summary":     entry["summary"],
+            "changes":     entry["changes"],
+        })
+        return True
+    except FsError:
+        return False
+
+
 @app.route("/api/data", methods=["POST"])
 @require_auth
 def api_save(token, user):
@@ -533,11 +726,24 @@ def api_save(token, user):
     if ws is None:
         return jsonify({"error": "Invalid workspace id"}), 400
     payload = request.get_json(force=True)
+    old = None
+    diff_failed = False
     try:
+        try:
+            old = fs_load(token, ws_data_url(ws))
+        except FsError:
+            diff_failed = True   # never block the save on a failed pre-read
         fs_save(token, ws_data_url(ws), payload)
     except FsError as exc:
         return jsonify({"error": str(exc)}), exc.http_status()
-    return jsonify({"ok": True, "ws": ws})
+    if diff_failed:
+        entry = {"summary": "Saved (previous version unavailable — no diff)",
+                 "changes": []}
+    else:
+        entry = compute_audit_diff(old, payload)
+    # audited: True when an entry was written OR no entry was needed
+    audited = _audit(token, ws, _email(user), entry) if entry else True
+    return jsonify({"ok": True, "ws": ws, "audited": audited})
 
 
 def _notify(token: str, recipient_uid: str, ntype: str, actor_email: str,
@@ -660,6 +866,21 @@ def api_notifications_read(token, user):
         except FsError:
             continue
     return jsonify({"ok": True, "updated": updated})
+
+
+@app.route("/api/audit", methods=["GET"])
+@require_auth
+def api_audit(token, user):
+    """Workspace audit trail, newest first. Owner + accepted members only,
+    enforced by Firestore rules on the underlying query (D13)."""
+    ws = _ws_param(user)
+    if ws is None:
+        return jsonify({"error": "Invalid workspace id"}), 400
+    try:
+        items = fs_query_audit(token, ws)
+    except FsError as exc:
+        return jsonify({"error": str(exc)}), exc.http_status()
+    return jsonify({"items": items, "ws": ws})
 
 
 @app.route("/api/schedule", methods=["POST"])
