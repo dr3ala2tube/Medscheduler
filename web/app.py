@@ -1,8 +1,11 @@
 """
 MedScheduler Web – Flask backend
 Exposes a REST API consumed by the single-page frontend.
-Data is stored in Firebase Firestore (shared document for the whole team).
-Authentication uses Firebase ID tokens verified via the REST API.
+Data is stored in Firebase Firestore, one private workspace per user
+(workspaces/{uid}) with email-based member sharing enforced by Firestore
+security rules. Authentication uses Firebase ID tokens verified via the
+REST API; all Firestore calls are made with the caller's own token, so
+access control is enforced by the rules, not by this server.
 """
 from __future__ import annotations
 
@@ -34,7 +37,15 @@ FIREBASE_API_KEY  = "AIzaSyC_d-HgnEnLAWW1f3dSKjuuAz4eplcVWz8"
 PROJECT_ID        = "medscheduler-e0853"
 FIRESTORE_BASE    = (f"https://firestore.googleapis.com/v1/projects/{PROJECT_ID}"
                      f"/databases/(default)/documents")
-SHARED_DOC        = f"{FIRESTORE_BASE}/shared/schedule"
+LEGACY_DOC        = f"{FIRESTORE_BASE}/shared/schedule"   # old team-wide doc, read-only
+
+def ws_meta_url(ws_id: str) -> str:
+    """Workspace meta/ACL document (owner_uid, owner_email, members)."""
+    return f"{FIRESTORE_BASE}/workspaces/{ws_id}"
+
+def ws_data_url(ws_id: str) -> str:
+    """Workspace schedule payload document."""
+    return f"{FIRESTORE_BASE}/workspaces/{ws_id}/data/schedule"
 
 app = Flask(__name__)
 app.config["JSON_SORT_KEYS"] = False
@@ -84,25 +95,71 @@ def _fs_to_py(value: Dict) -> Any:
     return None
 
 
-def fs_load(id_token: str) -> Optional[Dict]:
-    data = _http_json("GET", SHARED_DOC,
+class FsError(Exception):
+    """Firestore REST error carrying the upstream HTTP code."""
+    def __init__(self, code: int, message: str):
+        super().__init__(message)
+        self.code = code
+
+    def http_status(self) -> int:
+        # Surface permission denials as 403; everything else is a server error.
+        return 403 if self.code == 403 else 500
+
+
+def fs_load(id_token: str, url: str) -> Optional[Dict]:
+    data = _http_json("GET", url,
                       headers={"Authorization": f"Bearer {id_token}"})
     if "error" in data:
         code = data["error"].get("code", 0)
         if code == 404:
             return None
-        raise Exception(data["error"].get("message", "Firestore read error"))
+        raise FsError(code, data["error"].get("message", "Firestore read error"))
     if "fields" not in data:
         return None
     return _fs_to_py({"mapValue": {"fields": data["fields"]}})
 
 
-def fs_save(id_token: str, payload: Dict) -> None:
+def fs_save(id_token: str, url: str, payload: Dict) -> None:
     body = json.dumps({"fields": _py_to_fs(payload)["mapValue"]["fields"]}).encode()
-    data = _http_json("PATCH", SHARED_DOC, body=body,
+    data = _http_json("PATCH", url, body=body,
                       headers={"Authorization": f"Bearer {id_token}"}, timeout=20)
     if "error" in data:
-        raise Exception(data["error"].get("message", "Firestore write error"))
+        code = data["error"].get("code", 0)
+        raise FsError(code, data["error"].get("message", "Firestore write error"))
+
+
+def fs_query_shared_workspaces(id_token: str, email: str) -> List[Dict]:
+    """Return workspaces whose members array contains `email`.
+
+    Uses Firestore runQuery; the security rules allow this list operation
+    only when the query is constrained to the caller's own email.
+    """
+    body = json.dumps({
+        "structuredQuery": {
+            "from": [{"collectionId": "workspaces"}],
+            "where": {
+                "fieldFilter": {
+                    "field": {"fieldPath": "members"},
+                    "op":    "ARRAY_CONTAINS",
+                    "value": {"stringValue": email},
+                }
+            },
+        }
+    }).encode()
+    data = _http_json("POST", f"{FIRESTORE_BASE}:runQuery", body=body,
+                      headers={"Authorization": f"Bearer {id_token}"}, timeout=20)
+    if isinstance(data, dict) and "error" in data:
+        code = data["error"].get("code", 0)
+        raise FsError(code, data["error"].get("message", "Firestore query error"))
+    results = []
+    for item in (data if isinstance(data, list) else []):
+        doc = item.get("document")
+        if not doc:
+            continue
+        fields = _fs_to_py({"mapValue": {"fields": doc.get("fields", {})}})
+        fields["_id"] = doc["name"].rsplit("/", 1)[-1]
+        results.append(fields)
+    return results
 
 
 # ── Firebase token verification ───────────────────────────────────────────────
@@ -296,24 +353,130 @@ def api_shift_config_defaults():
     })
 
 
+# ── Workspaces ────────────────────────────────────────────────────────────────
+
+def _uid(user: Dict) -> str:
+    return user["localId"]
+
+
+def _email(user: Dict) -> str:
+    return user.get("email", "").strip().lower()
+
+
+def _ws_param(user: Dict) -> Optional[str]:
+    """Workspace id from ?ws= query arg; defaults to the caller's own uid.
+    Returns None if the supplied id is malformed."""
+    ws = request.args.get("ws", "").strip()
+    if not ws:
+        return _uid(user)
+    if not ws.isalnum() or len(ws) > 128:
+        return None
+    return ws
+
+
+def _ensure_own_meta(token: str, user: Dict) -> Dict:
+    """Load the caller's workspace meta doc, creating it on first login."""
+    meta = fs_load(token, ws_meta_url(_uid(user)))
+    if meta is None:
+        meta = {"owner_uid": _uid(user), "owner_email": _email(user), "members": []}
+        fs_save(token, ws_meta_url(_uid(user)), meta)
+    return meta
+
+
+@app.route("/api/workspaces", methods=["GET"])
+@require_auth
+def api_workspaces(token, user):
+    try:
+        meta = _ensure_own_meta(token, user)
+        shared = []
+        email = _email(user)
+        if email:
+            for ws in fs_query_shared_workspaces(token, email):
+                if ws.get("_id") and ws["_id"] != _uid(user):
+                    shared.append({"id": ws["_id"],
+                                   "owner_email": ws.get("owner_email", "")})
+    except FsError as exc:
+        return jsonify({"error": str(exc)}), exc.http_status()
+    return jsonify({
+        "own": {"id": _uid(user), "owner_email": _email(user),
+                "members": meta.get("members", [])},
+        "shared": shared,
+    })
+
+
+@app.route("/api/workspaces/members", methods=["POST"])
+@require_auth
+def api_workspace_members(token, user):
+    """Owner-only: add or remove a member email on the caller's own workspace.
+    Ownership is also enforced by Firestore rules (writes target the caller's
+    own meta doc and rules reject non-owner updates)."""
+    body   = request.get_json(force=True)
+    action = str(body.get("action", "")).strip().lower()
+    member = str(body.get("email", "")).strip().lower()
+    if action not in ("add", "remove"):
+        return jsonify({"error": "action must be 'add' or 'remove'"}), 400
+    if not member or "@" not in member or len(member) > 254:
+        return jsonify({"error": "A valid email address is required"}), 400
+    if member == _email(user):
+        return jsonify({"error": "You already own this workspace"}), 400
+    try:
+        meta = _ensure_own_meta(token, user)
+        members = list(meta.get("members", []))
+        if action == "add" and member not in members:
+            members.append(member)
+        elif action == "remove":
+            members = [m for m in members if m != member]
+        meta["members"] = members
+        fs_save(token, ws_meta_url(_uid(user)), meta)
+    except FsError as exc:
+        return jsonify({"error": str(exc)}), exc.http_status()
+    return jsonify({"ok": True, "members": members})
+
+
 @app.route("/api/data", methods=["GET"])
 @require_auth
 def api_load(token, user):
+    ws = _ws_param(user)
+    if ws is None:
+        return jsonify({"error": "Invalid workspace id"}), 400
     try:
-        data = fs_load(token)
-    except Exception as exc:
-        return jsonify({"error": str(exc)}), 500
-    return jsonify({"data": data})
+        data = fs_load(token, ws_data_url(ws))
+    except FsError as exc:
+        return jsonify({"error": str(exc)}), exc.http_status()
+    return jsonify({"data": data, "ws": ws})
 
 
 @app.route("/api/data", methods=["POST"])
 @require_auth
 def api_save(token, user):
+    ws = _ws_param(user)
+    if ws is None:
+        return jsonify({"error": "Invalid workspace id"}), 400
     payload = request.get_json(force=True)
     try:
-        fs_save(token, payload)
-    except Exception as exc:
-        return jsonify({"error": str(exc)}), 500
+        fs_save(token, ws_data_url(ws), payload)
+    except FsError as exc:
+        return jsonify({"error": str(exc)}), exc.http_status()
+    return jsonify({"ok": True, "ws": ws})
+
+
+@app.route("/api/data/import-legacy", methods=["POST"])
+@require_auth
+def api_import_legacy(token, user):
+    """One-time migration: copy the legacy shared/schedule doc into the
+    caller's own (empty) workspace. The legacy doc is never modified."""
+    uid = _uid(user)
+    try:
+        own = fs_load(token, ws_data_url(uid))
+        if own and (own.get("docs") or own.get("asgn")):
+            return jsonify({"error": "Workspace is not empty — import refused"}), 409
+        legacy = fs_load(token, LEGACY_DOC)
+        if legacy is None:
+            return jsonify({"error": "No legacy shared data found"}), 404
+        _ensure_own_meta(token, user)
+        fs_save(token, ws_data_url(uid), legacy)
+    except FsError as exc:
+        return jsonify({"error": str(exc)}), exc.http_status()
     return jsonify({"ok": True})
 
 

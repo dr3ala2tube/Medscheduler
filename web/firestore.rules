@@ -1,0 +1,50 @@
+// MedScheduler — Firestore security rules
+// Deploy manually: Firebase Console → Firestore Database → Rules → paste → Publish.
+// BEFORE publishing, copy the currently published rules somewhere safe
+// (Console keeps a rules history, which is the rollback path).
+//
+// Model:
+//   workspaces/{wsId}                — meta/ACL doc; wsId == owner's Firebase uid
+//                                      fields: owner_uid, owner_email, members (array of lowercase emails)
+//   workspaces/{wsId}/data/schedule  — schedule payload
+//   shared/schedule                  — legacy team-wide doc; read-only backup during migration
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    match /workspaces/{wsId} {
+      // Owner creates their own meta doc (first login)
+      allow create: if request.auth != null
+                    && request.auth.uid == wsId
+                    && request.resource.data.owner_uid == request.auth.uid;
+
+      // Owner or an invited member can read the meta doc
+      allow get: if request.auth != null
+                 && (request.auth.uid == wsId
+                     || request.auth.token.email in resource.data.members);
+
+      // "Workspaces shared with me" query (must filter members array-contains own email)
+      allow list: if request.auth != null
+                  && request.auth.token.email in resource.data.members;
+
+      // Only the owner can change membership or delete the workspace
+      allow update, delete: if request.auth != null && request.auth.uid == wsId;
+
+      // Schedule payload: owner or invited member, full read/write
+      match /data/schedule {
+        allow read, write: if request.auth != null
+          && (request.auth.uid == wsId
+              || request.auth.token.email in
+                 get(/databases/$(database)/documents/workspaces/$(wsId)).data.members);
+      }
+    }
+
+    // Legacy shared doc: read-only so existing data can be imported but never
+    // changed. Remove this whole block once migration is complete.
+    match /shared/schedule {
+      allow read: if request.auth != null;
+      allow write: if false;
+    }
+  }
+}
