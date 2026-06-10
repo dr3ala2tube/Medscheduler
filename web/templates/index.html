@@ -651,6 +651,8 @@ const S = {
   idToken: null,
   C: null,  // constants from server
   editing: null,  // {pid, day}
+  wsId: null,        // active workspace id (uid of the workspace owner)
+  workspaces: null,  // {own:{id,owner_email,members}, shared:[{id,owner_email}]}
 };
 
 // ── Undo / Redo history ─────────────────────────────────────────────
@@ -817,6 +819,7 @@ auth.onAuthStateChanged(async user => {
     $('auth-screen').style.display='none';
     $('app').classList.add('visible');
     await loadConstants();
+    await initWorkspaces();
     await loadData();
     renderAll();
   } else {
@@ -862,18 +865,68 @@ function populateStaticDropdowns(){
   });
 }
 
+// ── Workspaces ─────────────────────────────────────────────────────
+async function initWorkspaces(){
+  // Fetch own + shared workspaces; default to the user's own workspace.
+  try {
+    S.workspaces = await api('GET','/api/workspaces');
+    S.wsId = S.workspaces.own.id;
+  } catch(e){
+    S.workspaces = null; S.wsId = null;
+    toast('Could not load workspaces: '+e.message, 4000);
+  }
+}
+
+function viewingOwnWorkspace(){
+  return !S.workspaces || S.wsId === S.workspaces.own.id;
+}
+
 // ── Load / Save cloud data ─────────────────────────────────────────
+function wsQuery(){
+  return S.wsId ? `?ws=${encodeURIComponent(S.wsId)}` : '';
+}
+
 async function loadData(){
   setStatus('Loading from cloud…');
   try {
-    const res = await api('GET','/api/data');
-    if(res.data) applyData(res.data);
-    else initDefaultData();
+    const res = await api('GET','/api/data'+wsQuery());
+    if(res.data){
+      applyData(res.data);
+      setStatus('Loaded from cloud.');
+    } else {
+      initDefaultData();
+      setStatus('No cloud data – starting fresh.');
+      if(viewingOwnWorkspace()) await maybeOfferLegacyImport();
+    }
     resetHistory();
-    setStatus('Loaded from cloud.');
   } catch(e){
     initDefaultData();
-    setStatus('No cloud data – starting fresh.');
+    setStatus('Could not load: '+e.message);
+  }
+}
+
+async function maybeOfferLegacyImport(){
+  // One-time migration: own workspace is empty — offer to copy the old
+  // team-wide schedule into it. The legacy document is never modified.
+  const dismissKey = 'msched_legacy_import_dismissed';
+  try { if(localStorage.getItem(dismissKey)) return; } catch(_){}
+  if(!confirm('Your schedule is empty.\n\nImport the previous shared team schedule into your private workspace?')){
+    try { localStorage.setItem(dismissKey,'1'); } catch(_){}
+    return;
+  }
+  try {
+    await api('POST','/api/data/import-legacy');
+    const res = await api('GET','/api/data'+wsQuery());
+    if(res.data){ applyData(res.data); renderAll(); resetHistory(); }
+    toast('✓ Previous shared schedule imported');
+    setStatus('Imported previous shared schedule.');
+  } catch(e){
+    if(/No legacy shared data/i.test(e.message)){
+      try { localStorage.setItem(dismissKey,'1'); } catch(_){}
+      setStatus('No previous shared data to import – starting fresh.');
+    } else {
+      toast('Import failed: '+e.message, 5000);
+    }
   }
 }
 
@@ -910,7 +963,7 @@ function serializeState(){
 
 $('btn-save').onclick = async()=>{
   $('btn-save').disabled=true; $('btn-save').innerHTML='<span class="spinner"></span>Saving…';
-  try { await api('POST','/api/data',serializeState()); toast('✓ Saved to cloud'); }
+  try { await api('POST','/api/data'+wsQuery(),serializeState()); toast('✓ Saved to cloud'); }
   catch(e){ toast('Save failed: '+e.message,4000); }
   finally { $('btn-save').disabled=false; $('btn-save').textContent='☁ Save'; }
 };
@@ -919,7 +972,7 @@ $('btn-load').onclick = async()=>{
   if(!confirm('Replace current schedule with last cloud save?')) return;
   $('btn-load').disabled=true;
   try {
-    const res=await api('GET','/api/data');
+    const res=await api('GET','/api/data'+wsQuery());
     if(res.data){ applyData(res.data); renderAll(); resetHistory(); toast('✓ Loaded from cloud'); }
     else toast('No cloud data found.',4000);
   } catch(e){ toast('Load failed: '+e.message,4000); }

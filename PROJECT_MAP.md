@@ -1,6 +1,6 @@
 # PROJECT_MAP.md
 
-Last updated: 2026-06-10 — **M1 complete** (backend + rules, branch `feature/private-workspaces`). M2 pending.
+Last updated: 2026-06-10 — **M1 + M2 complete** (branch `feature/private-workspaces`). M3 (sharing UI) pending. Firestore rules NOT yet deployed — deploy together with code after M3.
 
 ## [TECH_STACK]
 
@@ -115,9 +115,9 @@ All Firestore calls keep the existing pattern: user's ID token, urllib REST, `_p
   - app.py: workspace helpers, `FsError`, url-parametrized `fs_load/fs_save`, `fs_query_shared_workspaces`; routes `GET /api/workspaces`, `POST /api/workspaces/members`, ws-scoped `GET/POST /api/data?ws=`, `POST /api/data/import-legacy`
   - `web/firestore.rules` written (manual deploy via Firebase Console; NOT yet deployed)
   - Verified V2 against mocked Firestore: 8 scenario groups (meta auto-create + email lowercasing, empty load, save/reload, invite add/self-reject/bad-input/duplicate, member discovery via query + cross-workspace load, member removal, import-legacy 409/404/success with legacy untouched, 403 passthrough). Rules-level enforcement test pending deployment (part of M4 matrix)
-- **M2 — Frontend workspace plumbing**
-  - Workspace bootstrap on login, `?ws=` on load/save, legacy-import prompt
-  - Pass: two test accounts each see their own independent schedule; import works once for empty workspace
+- **M2 — Frontend workspace plumbing — DONE 2026-06-10**
+  - index.html: `S.wsId`/`S.workspaces` state, `initWorkspaces()` on login, `wsQuery()` on all 4 data load/save call sites, `maybeOfferLegacyImport()` (one-time prompt for empty own workspace; declines and no-legacy remembered via localStorage flag `msched_legacy_import_dismissed`)
+  - Verified: node --check on extracted inline JS, Flask render test confirms all hooks + complete document. Live two-account check deferred to M4 (needs rules deploy)
 - **M3 — Sharing UI**
   - Share modal (add/remove member emails), workspace switcher, "Shared by" badge
   - Pass: A invites B → B sees A's workspace in switcher, can edit and save; A removes B → B loses access (next load fails / workspace disappears)
@@ -131,6 +131,4 @@ All Firestore calls keep the existing pattern: user's ID token, urllib REST, `_p
 ## [ORPHANS]
 
 - Desktop app (`medscheduler_refactored.py`, `firebase_service.py`) still targets `shared/schedule`; will become read-only after rules deploy → desktop cloud-save breaks until it is migrated to the workspace model (separate task, needs explicit approval).
-- Firebase web API key hardcoded in `app.py`/`index.html` and also expected as env var per DEPLOY.md — harmless (web API keys are public identifiers) but inconsistent; consider consolidating to env vars later.
-- Open self-signup (`createUserWithEmailAndPassword`) remains enabled; less risky once data is private-by-default, but an email allowlist remains an optional hardening step (was already in PROJECT_STATE.md pending list).
-- Legacy `shared/schedule` rules block should be removed after the migration window closes.
+- Firebase web API key hardcoded in `app.py`/`index.html` and also expected as env var per DEPLOY.md — harmless (web API keys are public identifiers) but inconsi
