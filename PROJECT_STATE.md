@@ -107,10 +107,11 @@ DR. JONES            ← name only (initials left blank)
 
 - **Zero third-party dependencies** — uses only Python's built-in `urllib`, `json`, `ssl`
 - Written this way because macOS shows `externally-managed-environment` error with pip
-- `FirebaseService` class: `sign_in()`, `sign_up()`, `sign_out()`, `save_app_data()`, `load_app_data()`, `upload_file()`, `list_files()`, `download_file()`
+- `FirebaseService` class: `sign_in()`, `sign_up()`, `sign_out()`, `get_workspaces()`, `save_app_data(workspace_id)`, `load_app_data(workspace_id)`, `upload_file()`, `list_files()`, `download_file()`
+- **New workspace model (June 2026)** — `get_workspaces()` returns own + shared workspaces; `save_app_data()` and `load_app_data()` accept optional `workspace_id` parameter (defaults to user's own uid)
+- Firestore document path: `workspaces/{workspace_id}/data/schedule` (new); `shared/schedule` (legacy, read-only)
 - `_py_to_fs(value)` / `_fs_to_py(value)` — Firestore typed-value serialization
 - Module-level singleton: `firebase = FirebaseService()`
-- Firestore document path: `shared/schedule`
 
 ---
 
@@ -193,7 +194,9 @@ GitHub no longer accepts passwords for git push. Must use a Personal Access Toke
 
 Since June 2026, signing in no longer grants access to any shared data:
 - **Every account gets only its own private, empty workspace**
-- Schedule access is granted per-workspace by the owner via 👥 Share (invite by email)
+- **New accounts (created on/after 2026-06-10) must verify their email** before the app or API accepts them; older accounts are grandfathered
+- Schedule access is granted per-workspace by the owner via 👥 Share — since 2026-06-10 this sends a **pending invitation** the recipient must Accept (or can Decline); members can later Leave via the 🚪 button
+- Owners get in-app notifications (🔔 bell, 60s poll) when an invitation is accepted/declined or a member leaves
 - Enforcement is in Firestore security rules (`web/firestore.rules`), not in the app —
   verified by direct REST probe returning 403 for revoked/uninvited users
 - Self-signup is still open, but a new account sees nothing until invited
@@ -218,8 +221,9 @@ Since June 2026, signing in no longer grants access to any shared data:
 - [x] **Deploy to Render** — live at `https://medscheduler-5io6.onrender.com` (June 2026)
 - [x] **Test web app end-to-end** — full two-account verification matrix passed 2026-06-10
 - [x] **Private workspaces + invite sharing** — shipped 2026-06-10 (see PROJECT_MAP.md)
-- [ ] **Remove legacy rules block** — delete the `shared/schedule` match from Firestore rules once everyone has imported their data (the old doc stays as an offline backup)
-- [ ] **Desktop app cloud-save is BROKEN** — `medscheduler_refactored.py`/`firebase_service.py` still write to `shared/schedule`, which is now read-only; needs migration to the workspace model if the desktop app is still used
+- [x] **Desktop app workspace migration** — completed 2026-06-10: `firebase_service.py` now supports `get_workspaces()`, parameterized `save_app_data(workspace_id)` / `load_app_data(workspace_id)` targeting `workspaces/{id}/data/schedule`; `medscheduler_refactored.py` UI updated with workspace selector dropdown and selection dialog after login
+- [x] **Cycle 2 shipped 2026-06-10** — first-login import popup removed; email verification for new signups (cutoff 2026-06-10 UTC, constant in app.py + index.html); invitation accept/decline/leave + notifications panel; UI fixes (#undefined cell color, dynamic max-hours highlight, header clipping, mobile touch targets). Rules v2 published (Console rules history = rollback)
+- [x] **Remove legacy rules block** — done in cycle 2; `shared/schedule` doc remains in Firestore as an inert backup
 - [ ] **Add email allowlist** (optional) — check `user.email` after sign-in against a hardcoded list
 - [ ] **Always-on Render** — upgrade to $7/month plan if the 30-second cold-start is annoying
 - [ ] **Custom domain** (optional) — Render supports free custom domains
@@ -247,17 +251,4 @@ chmod +x build_mac.sh
 ```bash
 cd ~/Desktop/MedScheduler/web
 pip install -r requirements.txt
-export FIREBASE_PROJECT_ID=medscheduler-e0853
-export FIREBASE_API_KEY=AIzaSyC_d-HgnEnLAWW1f3dSKjuuAz4eplcVWz8
-flask run --port 5000
-# Open: http://localhost:5000
-```
-
----
-
-## For the Next Session
-
-1. Read this file first (`PROJECT_STATE.md`)
-2. Read `REFERENCE.md` if you need scheduling engine or desktop UI details
-3. Read `web/DEPLOY.md` if deployment help is needed
-4. The Firebase config above has all credentials — no need to ask the user again
+export FIREBASE_

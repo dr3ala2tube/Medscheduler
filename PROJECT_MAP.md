@@ -1,6 +1,6 @@
 # PROJECT_MAP.md
 
-Last updated: 2026-06-10 — M1–M4 complete and live (web merged to `main`, deployed on Render `medscheduler-5io6.onrender.com`; desktop updated with workspace support). **NEW FEATURE CYCLE IN PROGRESS (M5–M10, approved; M5–M9 implemented — only M10 (verify+deploy) remains):** remove legacy-import prompt, email verification for new signups, invitation accept/decline/leave with per-user notifications panel, UI alignment review.
+Last updated: 2026-06-10 — M1–M4 complete and live (web merged to `main`, deployed on Render `medscheduler-5io6.onrender.com`; desktop updated with workspace support). **FEATURE CYCLE 2 COMPLETE AND LIVE (M5–M10, deployed 2026-06-10):** legacy-import prompt removed, email verification for new signups, invitation accept/decline/leave with per-user notifications panel, UI alignment fixes. Rules v2 (invites + notifications) published in Firebase Console.
 
 ## [TECH_STACK]
 
@@ -36,7 +36,7 @@ shared/schedule                            ← legacy doc; kept in Firestore as 
                                              unreachable after M5 rules (no block grants access)
 ```
 
-Additions implemented in M7 (rules publish pending at M10):
+Additions implemented in M7 (rules live since M10):
 ```
 workspaces/{ownerUid}.invites              ← array<string>, pending invitation emails (accepted → moved to members)
 
@@ -49,8 +49,7 @@ notifications/{recipientUid}/items/{autoId}
 ```
 
 ### Firestore security rules
-Current target text lives in `web/firestore.rules` (M5 version: workspaces block only; legacy `shared/schedule` block removed — NOT yet published to Firebase Console, goes live with M10 deploy).
-Feature cycle 2 (M7) will extend: invitee get/list via `invites`, diff-validated self-service updates for accept/decline/leave, `notifications/{uid}/items` block per D9.
+`web/firestore.rules` is the deployed text (published to Firebase Console at M10, 2026-06-10): invitee get/list via `invites`, diff-validated self-service accept/decline/leave transitions, owner identity fields frozen, `notifications/{uid}/items` block per D9, legacy `shared/schedule` block removed.
 
 ### Backend (web/app.py) — routes
 | Route | Method | Status |
@@ -126,10 +125,11 @@ All Firestore calls keep the existing pattern: user's ID token, urllib REST, `_p
   - Known issues found during planning: (1) BUG `renderSchedule`: `'#'+S.C.color_map[code]||'fff'` — precedence makes unknown codes render `#undefined`, should be `'#'+(S.C.color_map[code]||'fff')`; (2) hardcoded `hrs>160` red threshold ignores configurable `S.rules.max_hours`; (3) header row 1 crowding on ≤640px once bell is added (audit `ws-switch`/`ws-badge`/bell wrap behavior); (4) systematic pass over modals/header/sidebar at 360px/640px/900px/desktop widths
   - Fixed (before → after): (1) unknown shift codes rendered background `#undefined` → `'#'+(map[code]||'fff')`; (2) grid Hrs column + Summary red threshold hardcoded `>160` → follows configurable `S.rules.max_hours`; (3) `.hdr-row2` used flex-wrap + `overflow:hidden`, silently CLIPPING action buttons at ~901–1150px widths → nowrap + horizontal scroll at all widths; (4) header row 1 could overflow at ≤640px with switcher+Leave+bell → row scrolls, `#ws-select` capped 110px, redundant `#ws-badge` hidden, compact Leave; (5) `.doc-del` was hover-revealed (opacity:0) → always visible on touch widths
   - Pass: node --check, render test; live spot-check at 360/640/900px in M10 matrix
-- **M10 — V3 verification + deploy + docs — PREPARED 2026-06-10, awaiting human deploy approval**
+- **M10 — V3 verification + deploy + docs — DONE 2026-06-10 (V3: live operational verification)**
   - Pre-deploy regression: 13/13 passed on branch head 8ef4c20 (auth matrix, invitation lifecycle incl. notifications, render checks); all working-tree blobs == HEAD
   - **DEPLOY ORDER IS CRITICAL: publish Firestore rules FIRST, then merge/deploy code.** New code + old rules breaks login for everyone (the pending-invites runQuery is rejected → GET /api/workspaces 403). New rules + old code is safe (old code never touches `invites`; only gap: legacy-import for brand-new users during the minutes-long window, removed by the code deploy anyway)
-  - No git credentials in the work sandbox — branch push, merge, rules publish are human steps (runbook delivered in chat 2026-06-10)
+  - Deployed: rules published in Firebase Console (old rules in Console history = rollback), then branch merged to main via GitHub PR → Render auto-deploy
+  - Live matrix passed (user-confirmed 2026-06-10): new signup blocked until email verified, then empty schedule with no import popup; existing account unaffected; invite → bell badge → accept → workspace in switcher + owner notified; decline + leave both notify owner; revoke detected by poll; UI spot-checks at 360/640/900px clean
   - Rollback: restore prior rules from Console history; revert merge on GitHub (Render redeploys old code); `invites` arrays are additive (old code ignores them); legacy doc untouched; PROJECT_STATE.md update deferred until live matrix passes
 
 **Rollback (cycle 2):** restore previous Firestore rules from Firebase Console rules history; revert the feature branch (no main merge until approval); legacy `shared/schedule` doc is never modified or deleted.
