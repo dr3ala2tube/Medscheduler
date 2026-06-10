@@ -1712,6 +1712,8 @@ class LoginDialog(tk.Toplevel):
             else:
                 firebase.sign_in(email, password)
             self.parent._update_firebase_label()
+            # Show workspace selector after successful login
+            self.parent._select_workspace()
             self.destroy()
         except FirebaseAuthError as exc:
             self._err_var.set(str(exc))
@@ -1873,6 +1875,12 @@ class MedSchedulerApp(tk.Tk):
         self._redo_stack: List[dict] = []
         self._history_limit = 5
         self.status_var = tk.StringVar(value="Ready")
+
+        # Workspace state (private workspaces feature, June 2026+)
+        self.workspace_id: Optional[str] = None  # currently selected workspace
+        self.workspaces: Dict = {}               # {"own": uid, "shared": [...]}
+        self._ws_var = tk.StringVar()            # for workspace selector dropdown
+
         self.build_ui()
         self.refresh_all()
         self._update_firebase_label()
@@ -1971,6 +1979,15 @@ class MedSchedulerApp(tk.Tk):
         )
         self._fb_user_lbl.pack(side="left", padx=(0, 6))
         self._fb_user_lbl.bind("<Button-1>", lambda e: self._firebase_login())
+
+        # Workspace selector dropdown (visible only when signed in)
+        ttk.Label(fb_frame, text="Workspace:").pack(side="left", padx=(0, 4))
+        self._ws_dropdown = ttk.Combobox(
+            fb_frame, textvariable=self._ws_var, width=20, state="readonly"
+        )
+        self._ws_dropdown.pack(side="left", padx=(0, 6))
+        self._ws_dropdown.bind("<<ComboboxSelected>>", lambda e: self._on_workspace_change())
+
         ttk.Button(fb_frame, text="💾 Save",  command=self._firebase_save,  width=8).pack(side="left", padx=1)
         ttk.Button(fb_frame, text="⬇ Load",   command=self._firebase_load,  width=8).pack(side="left", padx=1)
         ttk.Button(fb_frame, text="📁 Files",  command=self._firebase_files, width=8).pack(side="left", padx=1)
@@ -3404,14 +3421,20 @@ class MedSchedulerApp(tk.Tk):
         if not _FIREBASE_AVAILABLE or firebase is None:
             self._fb_user_var.set("☁  Cloud unavailable")
             self._fb_user_lbl.configure(foreground="#aaa")
+            self._ws_dropdown.configure(state="disabled")
             return
         if firebase.is_signed_in:
             short = (firebase.email or "")[:28]
             self._fb_user_var.set(f"☁  {short}  [sign out]")
             self._fb_user_lbl.configure(foreground="#1a7f4b")
+            self._ws_dropdown.configure(state="readonly")
         else:
             self._fb_user_var.set("☁  Not signed in  [click to sign in]")
             self._fb_user_lbl.configure(foreground="#777")
+            self._ws_var.set("")
+            self._ws_dropdown.configure(state="disabled")
+            self.workspace_id = None
+            self.workspaces = {}
 
     def _firebase_login(self) -> None:
         """Open sign-in dialog, or sign out if already signed in."""
@@ -3425,10 +3448,117 @@ class MedSchedulerApp(tk.Tk):
                                    f"Signed in as {firebase.email}.\n\nSign out?",
                                    parent=self):
                 firebase.sign_out()
+                self.workspace_id = None
+                self.workspaces = {}
                 self._update_firebase_label()
                 self.status_var.set("Signed out of MedScheduler Cloud.")
         else:
             LoginDialog(self)
+
+
+    def _select_workspace(self) -> None:
+        """Fetch available workspaces and show selector dialog."""
+        if not _FIREBASE_AVAILABLE or firebase is None:
+            return
+        if not firebase.is_signed_in:
+            return
+
+        def _do():
+            try:
+                ws_data = firebase.get_workspaces()
+                self.after(0, lambda: self._show_workspace_selector(ws_data))
+            except Exception as exc:
+                self.after(0, lambda: (
+                    messagebox.showerror("Workspace Error", f"Failed to load workspaces:\n{exc}", parent=self),
+                    self.status_var.set("Failed to load workspaces."),
+                ))
+
+        threading.Thread(target=_do, daemon=True).start()
+
+    def _show_workspace_selector(self, ws_data: Dict) -> None:
+        """Show dialog to select a workspace."""
+        own_uid = ws_data.get("own")
+        shared = ws_data.get("shared", [])
+
+        # Build list of workspace options: (label, workspace_id)
+        options = [("My Schedule", own_uid)]
+        for ws in shared:
+            label = f"{ws.get('owner_email', 'Unknown')}'s Schedule"
+            options.append((label, ws.get("id")))
+
+        if not options:
+            messagebox.showinfo("No Workspaces",
+                                "No workspaces available.\n\n"
+                                "Create a new schedule by saving data to your own workspace.",
+                                parent=self)
+            return
+
+        # Store workspaces for future use
+        self.workspaces = ws_data
+
+        # Show simple picker: use a radio-button dialog
+        dlg = tk.Toplevel(self)
+        dlg.title("Select Workspace")
+        dlg.geometry("300x200")
+        dlg.transient(self)
+        dlg.grab_set()
+
+        frm = ttk.Frame(dlg, padding=14)
+        frm.pack(fill="both", expand=True)
+
+        ttk.Label(frm, text="Choose a schedule to work with:",
+                  font=("Segoe UI", 10)).pack(anchor="w", pady=(0, 10))
+
+        selected = tk.StringVar(value=own_uid)
+        for label, ws_id in options:
+            ttk.Radiobutton(frm, text=label, variable=selected, value=ws_id).pack(anchor="w", pady=2)
+
+        btn_frm = ttk.Frame(frm)
+        btn_frm.pack(fill="x", pady=(14, 0))
+
+        def _select():
+            self.workspace_id = selected.get()
+            # Update dropdown
+            self._populate_workspace_dropdown(ws_data)
+            self.status_var.set(f"Workspace: {selected.get()[:8]}…")
+            dlg.destroy()
+
+        ttk.Button(btn_frm, text="Select", command=_select, width=12).pack(side="left", padx=(0, 6))
+        ttk.Button(btn_frm, text="Cancel", command=dlg.destroy, width=12).pack(side="left")
+
+    def _populate_workspace_dropdown(self, ws_data: Dict) -> None:
+        """Populate the workspace selector dropdown."""
+        own_uid = ws_data.get("own")
+        shared = ws_data.get("shared", [])
+
+        options = [("My Schedule", own_uid)]
+        for ws in shared:
+            label = f"{ws.get('owner_email', 'Unknown')}'s Schedule"
+            options.append((label, ws.get("id")))
+
+        # Store options for dropdown
+        self._workspace_options = options
+        labels = [label for label, _ in options]
+        self._ws_dropdown["values"] = labels
+
+        # Set current value
+        if self.workspace_id:
+            for label, ws_id in options:
+                if ws_id == self.workspace_id:
+                    self._ws_var.set(label)
+                    break
+
+    def _on_workspace_change(self) -> None:
+        """Handle workspace selection from dropdown."""
+        selected_label = self._ws_var.get()
+        if not selected_label or not self.workspace_id:
+            return
+        # Find corresponding workspace_id
+        for label, ws_id in getattr(self, "_workspace_options", []):
+            if label == selected_label:
+                self.workspace_id = ws_id
+                self.status_var.set(f"Workspace: {selected_label}")
+                return
 
     def _firebase_save(self) -> None:
         """Save all app data to Firestore (runs in background thread)."""
@@ -3442,12 +3572,17 @@ class MedSchedulerApp(tk.Tk):
                                 "Please sign in to your MedScheduler Cloud account first.",
                                 parent=self)
             return
+        if not self.workspace_id:
+            messagebox.showinfo("No Workspace",
+                                "Please select a workspace first (use the workspace dropdown).",
+                                parent=self)
+            return
         self.status_var.set("Saving to cloud…")
         data = self._serialize_app()
 
         def _do():
             try:
-                firebase.save_app_data(data)
+                firebase.save_app_data(data, workspace_id=self.workspace_id)
                 self.after(0, lambda: self.status_var.set("✓  Data saved to MedScheduler Cloud."))
             except Exception as exc:
                 self.after(0, lambda: (
@@ -3469,6 +3604,11 @@ class MedSchedulerApp(tk.Tk):
                                 "Please sign in to your MedScheduler Cloud account first.",
                                 parent=self)
             return
+        if not self.workspace_id:
+            messagebox.showinfo("No Workspace",
+                                "Please select a workspace first (use the workspace dropdown).",
+                                parent=self)
+            return
         if not messagebox.askyesno(
             "Load from Cloud",
             "This will REPLACE the current schedule with your last cloud save.\n\n"
@@ -3480,7 +3620,7 @@ class MedSchedulerApp(tk.Tk):
 
         def _do():
             try:
-                data = firebase.load_app_data()
+                data = firebase.load_app_data(workspace_id=self.workspace_id)
                 if data is None:
                     self.after(0, lambda: (
                         messagebox.showinfo("No Cloud Data",

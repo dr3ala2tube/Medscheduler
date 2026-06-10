@@ -110,8 +110,9 @@ class FirebaseService:
         from firebase_service import firebase, FirebaseAuthError
 
         firebase.sign_in("user@example.com", "password123")
-        firebase.save_app_data({"docs": [...], "asgn": {...}, ...})
-        data = firebase.load_app_data()
+        workspaces = firebase.get_workspaces()  # {"own": uid, "shared": [...]}
+        firebase.save_app_data({"docs": [...], "asgn": {...}, ...}, workspace_id=ws_id)
+        data = firebase.load_app_data(workspace_id=ws_id)
         url  = firebase.upload_file("/path/to/export.xlsx")
     """
 
@@ -156,15 +157,86 @@ class FirebaseService:
 
     # ── Firestore ────────────────────────────────────────────────────────────
 
-    def save_app_data(self, payload: Dict) -> None:
-        """Persist the full app state to Firestore at users/{uid}/app_data/main."""
-        url  = f"{_FS_BASE}/users/{self.uid}/app_data/main"
+    def get_workspaces(self) -> Dict:
+        """
+        Get user's own workspace and shared workspaces.
+        Returns: {"own": own_uid, "shared": [{"id": ws_id, "owner_email": "..."}]}
+
+        Side effect: ensures own workspace meta doc exists (auto-creates if absent).
+        """
+        self._ensure_token()
+
+        # Ensure own meta doc exists at workspaces/{uid}
+        own_path = f"{_FS_BASE}/workspaces/{self.uid}"
+        own_doc_body = {
+            "fields": _py_to_fs({
+                "owner_uid": self.uid,
+                "owner_email": (self.email or "").lower(),
+                "members": []
+            })["mapValue"]["fields"]
+        }
+        try:
+            # Attempt PATCH (upsert); if 404, create via createDocument
+            _patch_json(own_path, own_doc_body, headers=self._auth_headers(), timeout=15)
+        except Exception as e:
+            # If doc doesn't exist, create it
+            if "404" in str(e) or "NOT_FOUND" in str(e):
+                create_url = f"{_FS_BASE}?collectionId=workspaces"
+                doc_body = {"fields": own_doc_body["fields"]}
+                _post_json(create_url, doc_body, headers=self._auth_headers(), timeout=15)
+            else:
+                raise
+
+        # Query for shared workspaces (where user's email is in members array)
+        # Using Firestore REST API's runQuery endpoint
+        query_url = f"{_FS_BASE}:runQuery"
+        query_body = {
+            "structuredQuery": {
+                "from": [{"collectionId": "workspaces"}],
+                "where": {
+                    "fieldFilter": {
+                        "field": {"fieldPath": "members"},
+                        "op": "ARRAY_CONTAINS",
+                        "value": {"stringValue": (self.email or "").lower()}
+                    }
+                }
+            }
+        }
+        try:
+            result = _post_json(query_url, query_body, headers=self._auth_headers(), timeout=15)
+            shared = []
+            for item in result if isinstance(result, list) else [result]:
+                doc = item.get("document", {})
+                if doc and "name" in doc:
+                    doc_id = doc["name"].split("/")[-1]
+                    fields = doc.get("fields", {})
+                    owner_email = _fs_to_py(fields.get("owner_email", {"stringValue": ""}))
+                    shared.append({"id": doc_id, "owner_email": owner_email})
+        except Exception:
+            shared = []
+
+        return {"own": self.uid, "shared": shared}
+
+    def save_app_data(self, payload: Dict, workspace_id: Optional[str] = None) -> None:
+        """
+        Persist the full app state to Firestore at workspaces/{workspace_id}/data/schedule.
+        If workspace_id is None, defaults to user's own uid.
+        """
+        self._ensure_token()
+        ws_id = workspace_id or self.uid
+        url = f"{_FS_BASE}/workspaces/{ws_id}/data/schedule"
         body = {"fields": _py_to_fs(payload)["mapValue"]["fields"]}
         _patch_json(url, body, headers=self._auth_headers(), timeout=25)
 
-    def load_app_data(self) -> Optional[Dict]:
-        """Load app state from Firestore. Returns None if nothing saved yet."""
-        url = f"{_FS_BASE}/users/{self.uid}/app_data/main"
+    def load_app_data(self, workspace_id: Optional[str] = None) -> Optional[Dict]:
+        """
+        Load app state from Firestore at workspaces/{workspace_id}/data/schedule.
+        If workspace_id is None, defaults to user's own uid.
+        Returns None if nothing saved yet.
+        """
+        self._ensure_token()
+        ws_id = workspace_id or self.uid
+        url = f"{_FS_BASE}/workspaces/{ws_id}/data/schedule"
         data = _get_json(url, headers=self._auth_headers(), timeout=15)
         if "error" in data:
             code = data["error"].get("code", 0)
