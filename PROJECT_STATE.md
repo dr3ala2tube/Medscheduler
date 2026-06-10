@@ -1,4 +1,4 @@
-# MedScheduler — Project State (Last updated: April 2026)
+# MedScheduler — Project State (Last updated: June 2026)
 
 This file is the single source of truth for resuming work on MedScheduler.
 Read this at the start of every new session instead of reconstructing from history.
@@ -41,21 +41,20 @@ MedScheduler/
 
 **Sign-in method:** Email/Password (must be enabled in Firebase Console → Authentication → Sign-in method)
 
-**Firestore rules** (paste in Firebase Console → Firestore → Rules):
-```
-rules_version = '2';
-service cloud.firestore {
-  match /databases/{database}/documents {
-    match /shared/schedule {
-      allow read, write: if request.auth != null;
-    }
-  }
-}
-```
-**Shared data path:** `shared/schedule` (one document for the whole team)
+**Firestore rules:** see `web/firestore.rules` (deployed 2026-06-10 via Firebase Console).
+Data model (since June 2026, "private workspaces" feature):
 
-**To add team members:** Firebase Console → Authentication → Users → Add user (email + password).
-Only accounts you create here can log in — this is how access is restricted.
+| Firestore path | Purpose | Access |
+|---|---|---|
+| `workspaces/{uid}` | Workspace meta/ACL: `owner_uid`, `owner_email`, `members` (lowercase emails) | Owner full; members read; only owner edits membership |
+| `workspaces/{uid}/data/schedule` | Schedule payload (same shape as old shared doc) | Owner + invited members, full read/write |
+| `shared/schedule` | LEGACY old team-wide doc, kept as read-only backup | Any authenticated user, read-only |
+
+**Sharing model:** every account gets a private workspace (auto-created on first
+login). The owner invites colleagues by email via the 👥 Share button; invited
+users see the workspace in a header dropdown and can edit it. Removing the email
+revokes access instantly (enforced by Firestore rules, verified live 2026-06-10
+incl. direct-REST 403 check). Old rules backup: Firebase Console → Rules history.
 
 ---
 
@@ -118,7 +117,7 @@ DR. JONES            ← name only (initials left blank)
 ## Web App — What Was Built
 
 ### Architecture
-- **Multi-user**: one shared Firestore document for the whole team
+- **Multi-user**: private per-user Firestore workspaces with email-invite sharing (see Firebase section above); access enforced by Firestore security rules — Flask only relays the caller's own ID token
 - **Auth**: Firebase JS SDK on the client; Flask backend verifies ID token on every API call
 - **No build step**: plain HTML + vanilla JS, Firebase CDN, no npm/webpack needed
 
@@ -137,8 +136,11 @@ Flask backend routes:
 |-------|--------|------|---------|
 | `/` | GET | No | Serves index.html |
 | `/api/constants` | GET | No | Returns SHIFTS, COLOR_MAP, SPEC_OPTIONS, etc. |
-| `/api/data` | GET | Yes | Loads shared schedule from Firestore |
-| `/api/data` | POST | Yes | Saves shared schedule to Firestore |
+| `/api/workspaces` | GET | Yes | Own workspace (auto-created) + workspaces shared with me |
+| `/api/workspaces/members` | POST | Yes | Owner adds/removes an invited member email |
+| `/api/data?ws=<id>` | GET | Yes | Loads a workspace schedule (default: own) |
+| `/api/data?ws=<id>` | POST | Yes | Saves a workspace schedule (default: own) |
+| `/api/data/import-legacy` | POST | Yes | One-time copy of old shared doc into own empty workspace |
 | `/api/schedule` | POST | Yes | Runs auto_schedule(), returns asgn dict |
 | `/api/summary` | POST | Yes | Returns per-physician statistics |
 | `/api/export/rota` | POST | Yes | Returns .xlsx rota file |
@@ -187,13 +189,15 @@ GitHub no longer accepts passwords for git push. Must use a Personal Access Toke
 
 ---
 
-## Access Control (who can log in)
+## Access Control (who sees what)
 
-Firebase does not have a built-in email allowlist. The approach used here:
-- **Only create Firebase accounts for people you want to have access**
-- Firebase Console → Authentication → Users → Add user (email + password)
-- Since you control account creation, only those accounts can ever sign in
-- Optional enhancement: hardcode an email allowlist in `index.html` JS and check after sign-in
+Since June 2026, signing in no longer grants access to any shared data:
+- **Every account gets only its own private, empty workspace**
+- Schedule access is granted per-workspace by the owner via 👥 Share (invite by email)
+- Enforcement is in Firestore security rules (`web/firestore.rules`), not in the app —
+  verified by direct REST probe returning 403 for revoked/uninvited users
+- Self-signup is still open, but a new account sees nothing until invited
+- Optional hardening (unchanged): email allowlist check after sign-in
 
 ---
 
@@ -211,8 +215,11 @@ Firebase does not have a built-in email allowlist. The approach used here:
 
 ## Pending / Next Steps
 
-- [ ] **Deploy to Render** — push `web/` to GitHub, connect to Render, set env vars, add authorized domain
-- [ ] **Test web app end-to-end** — sign in, add physicians, run auto-schedule, export
+- [x] **Deploy to Render** — live at `https://medscheduler-5io6.onrender.com` (June 2026)
+- [x] **Test web app end-to-end** — full two-account verification matrix passed 2026-06-10
+- [x] **Private workspaces + invite sharing** — shipped 2026-06-10 (see PROJECT_MAP.md)
+- [ ] **Remove legacy rules block** — delete the `shared/schedule` match from Firestore rules once everyone has imported their data (the old doc stays as an offline backup)
+- [ ] **Desktop app cloud-save is BROKEN** — `medscheduler_refactored.py`/`firebase_service.py` still write to `shared/schedule`, which is now read-only; needs migration to the workspace model if the desktop app is still used
 - [ ] **Add email allowlist** (optional) — check `user.email` after sign-in against a hardcoded list
 - [ ] **Always-on Render** — upgrade to $7/month plan if the 30-second cold-start is annoying
 - [ ] **Custom domain** (optional) — Render supports free custom domains

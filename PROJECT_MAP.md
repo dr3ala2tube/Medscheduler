@@ -1,6 +1,6 @@
 # PROJECT_MAP.md
 
-Last updated: 2026-06-10 — **M1 + M2 + M3 complete** (branch `feature/private-workspaces`). M4 (live two-account verification) pending. Firestore rules NOT yet deployed — deploy rules + code together, then run M4.
+Last updated: 2026-06-10 — **ALL MILESTONES COMPLETE, FEATURE LIVE.** Merged to `main`, deployed on Render (`medscheduler-5io6.onrender.com`), Firestore rules published, full M4 verification matrix passed.
 
 ## [TECH_STACK]
 
@@ -117,17 +117,20 @@ All Firestore calls keep the existing pattern: user's ID token, urllib REST, `_p
   - Verified V2 against mocked Firestore: 8 scenario groups (meta auto-create + email lowercasing, empty load, save/reload, invite add/self-reject/bad-input/duplicate, member discovery via query + cross-workspace load, member removal, import-legacy 409/404/success with legacy untouched, 403 passthrough). Rules-level enforcement test pending deployment (part of M4 matrix)
 - **M2 — Frontend workspace plumbing — DONE 2026-06-10**
   - index.html: `S.wsId`/`S.workspaces` state, `initWorkspaces()` on login, `wsQuery()` on all 4 data load/save call sites, `maybeOfferLegacyImport()` (one-time prompt for empty own workspace; declines and no-legacy remembered via localStorage flag `msched_legacy_import_dismissed`)
-  - Verified: node --check on extracted inline JS, Flask render test confirms all hooks + complete document. Live two-account check deferred to M4 (needs rules deploy)
+  - Verified: node --check on extracted inline JS, Flask render test, blob-hash commit verification
 - **M3 — Sharing UI — DONE 2026-06-10**
-  - index.html: workspace switcher `#ws-select` in header row 1 (hidden unless ≥1 shared workspace), `#ws-badge` "Shared by <owner>" chip, `👥 Share` button in row 2, Share modal (invite by email / remove, wired to POST /api/workspaces/members), `renderWsSwitcher/updateWsBadge/renderShareList/shareAction`
-  - Verified: node --check on inline JS, all 10 new element ids present, Flask render test complete-document check. Live pass criteria (A invites B → B edits; A removes B → access lost) moved to M4 matrix
-- **M4 — Verification + docs (V2)**
-  - End-to-end manual test matrix with two accounts (own/shared/revoked/unauthenticated)
-  - Update PROJECT_STATE.md (rules, data paths, access-control section); update [ORPHANS]
-  - Pass: full matrix green; PROJECT_STATE.md current
+  - index.html: workspace switcher `#ws-select` in header row 1 (hidden unless ≥1 shared workspace), `#ws-badge` "Shared by <owner>" chip, `👥 Share` button in row 2, Share modal (invite by email / remove, wired to POST /api/workspaces/members)
+  - Verified: node --check, element-id checks, Flask render test; live pass criteria confirmed in M4
+- **M4 — Verification + docs — DONE 2026-06-10 (V3: live operational verification)**
+  - Deployed: fast-forward merge to main → GitHub → Render; rules published in Firebase Console (old rules in Console rules history = rollback)
+  - Live matrix passed (user-confirmed): own data private; one-time legacy-import prompt with remembered dismissal; empty workspace for new user; invite → shared workspace in dropdown, editable; remove → dropdown entry disappears; direct REST probe with revoked account → 403; owner probe of own workspace → 200
+  - PROJECT_STATE.md updated (data model, rules, routes, access control, pending list)
 
 **Rollback procedure (required before M1 deploy):** restore previous Firestore rules from Firebase Console rules history (or paste the old rules text preserved in PROJECT_STATE.md); revert the feature branch (no main merge until approval); legacy `shared/schedule` doc is never modified or deleted, so pre-change behavior returns fully once old rules are restored and the old code is redeployed.
 
 ## [ORPHANS]
 
-- Desktop app (`medscheduler_refactored.py`, `firebase_service.py`) still targets `
+- Desktop app (`medscheduler_refactored.py`, `firebase_service.py`) still targets `shared/schedule`, which is now read-only → **desktop cloud-save is currently broken** (load still works). Migrate to the workspace model if the desktop app is still needed (separate task, needs explicit approval).
+- Firebase web API key hardcoded in `app.py`/`index.html` and also expected as env var per DEPLOY.md — harmless (web API keys are public identifiers) but inconsistent; consider consolidating to env vars later.
+- Open self-signup (`createUserWithEmailAndPassword`) remains enabled; less risky once data is private-by-default, but an email allowlist remains an optional hardening step (was already in PROJECT_STATE.md pending list).
+- Legacy `shared/schedule` rules block should be removed after the migration window closes.
