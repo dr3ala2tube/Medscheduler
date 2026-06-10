@@ -7,7 +7,9 @@
 //   workspaces/{wsId}                — meta/ACL doc; wsId == owner's Firebase uid
 //                                      fields: owner_uid, owner_email, members (array of lowercase emails)
 //   workspaces/{wsId}/data/schedule  — schedule payload
-//   shared/schedule                  — legacy team-wide doc; read-only backup during migration
+//
+// The legacy team-wide doc (shared/schedule) remains in Firestore as an
+// untouched backup but is no longer reachable: no rules block grants access.
 
 rules_version = '2';
 service cloud.firestore {
@@ -38,13 +40,6 @@ service cloud.firestore {
               || request.auth.token.email in
                  get(/databases/$(database)/documents/workspaces/$(wsId)).data.members);
       }
-    }
-
-    // Legacy shared doc: read-only so existing data can be imported but never
-    // changed. Remove this whole block once migration is complete.
-    match /shared/schedule {
-      allow read: if request.auth != null;
-      allow write: if false;
     }
   }
 }

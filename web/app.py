@@ -37,7 +37,6 @@ FIREBASE_API_KEY  = "AIzaSyC_d-HgnEnLAWW1f3dSKjuuAz4eplcVWz8"
 PROJECT_ID        = "medscheduler-e0853"
 FIRESTORE_BASE    = (f"https://firestore.googleapis.com/v1/projects/{PROJECT_ID}"
                      f"/databases/(default)/documents")
-LEGACY_DOC        = f"{FIRESTORE_BASE}/shared/schedule"   # old team-wide doc, read-only
 
 def ws_meta_url(ws_id: str) -> str:
     """Workspace meta/ACL document (owner_uid, owner_email, members)."""
@@ -458,26 +457,6 @@ def api_save(token, user):
     except FsError as exc:
         return jsonify({"error": str(exc)}), exc.http_status()
     return jsonify({"ok": True, "ws": ws})
-
-
-@app.route("/api/data/import-legacy", methods=["POST"])
-@require_auth
-def api_import_legacy(token, user):
-    """One-time migration: copy the legacy shared/schedule doc into the
-    caller's own (empty) workspace. The legacy doc is never modified."""
-    uid = _uid(user)
-    try:
-        own = fs_load(token, ws_data_url(uid))
-        if own and (own.get("docs") or own.get("asgn")):
-            return jsonify({"error": "Workspace is not empty — import refused"}), 409
-        legacy = fs_load(token, LEGACY_DOC)
-        if legacy is None:
-            return jsonify({"error": "No legacy shared data found"}), 404
-        _ensure_own_meta(token, user)
-        fs_save(token, ws_data_url(uid), legacy)
-    except FsError as exc:
-        return jsonify({"error": str(exc)}), exc.http_status()
-    return jsonify({"ok": True})
 
 
 @app.route("/api/schedule", methods=["POST"])

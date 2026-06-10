@@ -959,37 +959,11 @@ async function loadData(){
     } else {
       initDefaultData();
       setStatus('No cloud data – starting fresh.');
-      if(viewingOwnWorkspace()) await maybeOfferLegacyImport();
     }
     resetHistory();
   } catch(e){
     initDefaultData();
     setStatus('Could not load: '+e.message);
-  }
-}
-
-async function maybeOfferLegacyImport(){
-  // One-time migration: own workspace is empty — offer to copy the old
-  // team-wide schedule into it. The legacy document is never modified.
-  const dismissKey = 'msched_legacy_import_dismissed';
-  try { if(localStorage.getItem(dismissKey)) return; } catch(_){}
-  if(!confirm('Your schedule is empty.\n\nImport the previous shared team schedule into your private workspace?')){
-    try { localStorage.setItem(dismissKey,'1'); } catch(_){}
-    return;
-  }
-  try {
-    await api('POST','/api/data/import-legacy');
-    const res = await api('GET','/api/data'+wsQuery());
-    if(res.data){ applyData(res.data); renderAll(); resetHistory(); }
-    toast('✓ Previous shared schedule imported');
-    setStatus('Imported previous shared schedule.');
-  } catch(e){
-    if(/No legacy shared data/i.test(e.message)){
-      try { localStorage.setItem(dismissKey,'1'); } catch(_){}
-      setStatus('No previous shared data to import – starting fresh.');
-    } else {
-      toast('Import failed: '+e.message, 5000);
-    }
   }
 }
 
