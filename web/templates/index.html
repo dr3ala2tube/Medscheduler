@@ -35,7 +35,9 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(
 .auth-err{color:var(--danger);font-size:.85rem;min-height:20px;margin-top:10px;text-align:center}
 .btn-primary{width:100%;padding:11px;background:var(--primary);color:#fff;border:none;border-radius:8px;font-size:.95rem;font-weight:600;cursor:pointer;margin-top:20px;transition:background .15s}
 .btn-primary:hover{background:var(--primary-dark)}
-.btn-link{background:none;border:none;color:var(--primary);font-size:.87rem;cursor:pointer;margin-top:12px;display:block;text-align:center;text-decoration:underline}
+.btn-link{background:none;border:none;color:var(--primary);font-size:.87rem;cursor:pointer;margin-top:12px;display:block;text-align:center;text-decoration:underline;width:100%}
+.btn-link:disabled{opacity:.5;cursor:not-allowed}
+.verify-text{font-size:.9rem;text-align:center;line-height:1.5;word-break:break-all}
 
 /* ── Main App Layout ───────────────────────────────────────────── */
 #app{display:none;flex-direction:column;height:100vh;overflow:hidden}
@@ -44,7 +46,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(
 /* ── Header ────────────────────────────────────────────────────── */
 header{background:var(--primary);color:#fff;display:flex;flex-direction:column;flex-shrink:0;box-shadow:0 2px 8px rgba(0,0,0,.2)}
 .hdr-row1{display:flex;align-items:center;padding:0 14px;height:46px;gap:10px}
-.hdr-row2{display:flex;align-items:center;padding:0 14px;height:40px;gap:6px;background:rgba(0,0,0,.12);flex-wrap:wrap;overflow:hidden}
+.hdr-row2{display:flex;align-items:center;padding:0 14px;height:40px;gap:6px;background:rgba(0,0,0,.12);flex-wrap:nowrap;overflow-x:auto;overflow-y:hidden;scrollbar-width:thin}
 .logo{font-weight:800;font-size:1.1rem;letter-spacing:-.02em}
 .month-nav{display:flex;align-items:center;gap:6px;background:rgba(255,255,255,.15);border-radius:8px;padding:4px 10px}
 .month-nav button{background:none;border:none;color:#fff;font-size:1.1rem;cursor:pointer;line-height:1;padding:2px 4px;border-radius:4px}
@@ -64,6 +66,21 @@ header{background:var(--primary);color:#fff;display:flex;flex-direction:column;f
 #ws-select option{color:#1a202c}
 #ws-badge{display:none;font-size:.74rem;background:rgba(255,255,255,.25);padding:3px 9px;border-radius:10px;white-space:nowrap}
 .share-hint{font-size:.82rem;color:var(--muted);margin-bottom:2px;line-height:1.45}
+#btn-notif{position:relative;background:rgba(255,255,255,.2);border:none;color:#fff;cursor:pointer;padding:4px 9px;border-radius:6px;font-size:.9rem;line-height:1}
+#btn-notif:hover{background:rgba(255,255,255,.3)}
+#notif-badge{display:none;position:absolute;top:-5px;right:-5px;background:var(--danger);color:#fff;font-size:.64rem;font-weight:700;border-radius:9px;padding:1px 5px;min-width:16px;text-align:center;line-height:1.3}
+.notif-subhead{font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin:14px 0 4px}
+.notif-item{display:flex;align-items:center;gap:8px;padding:8px;border-radius:6px;background:var(--bg);margin-top:6px;font-size:.83rem}
+.notif-item.unread{background:#eff6ff;border-left:3px solid var(--primary)}
+.notif-time{color:var(--muted);font-size:.72rem;margin-left:auto;white-space:nowrap;flex-shrink:0}
+.notif-empty{color:var(--muted);font-size:.82rem;padding:6px 0}
+.notif-actions{display:flex;gap:6px;margin-left:auto;flex-shrink:0}
+.btn-accept{background:var(--success);color:#fff;border:none;border-radius:6px;padding:5px 12px;font-size:.78rem;font-weight:600;cursor:pointer}
+.btn-accept:hover{filter:brightness(1.08)}
+.btn-decline{background:#fff;color:var(--danger);border:1px solid var(--danger);border-radius:6px;padding:5px 12px;font-size:.78rem;font-weight:600;cursor:pointer}
+.btn-decline:hover{background:#fee2e2}
+#btn-leave-ws{display:none;background:rgba(220,38,38,.5);border:none;color:#fff;padding:4px 10px;border-radius:7px;font-size:.74rem;font-weight:600;cursor:pointer;white-space:nowrap;height:26px}
+#btn-leave-ws:hover{background:rgba(220,38,38,.8)}
 
 /* ── Body ──────────────────────────────────────────────────────── */
 .body{display:flex;flex:1;overflow:hidden}
@@ -243,8 +260,9 @@ table.summary .high{color:var(--danger);font-weight:700}
   .auth-card{width:calc(100vw - 32px);padding:26px 18px}
   .auth-logo{font-size:1.7rem}
 
-  /* Header row 1 */
-  .hdr-row1{height:44px;padding:0 8px;gap:6px}
+  /* Header row 1: scroll instead of clip when crowded */
+  .hdr-row1{height:44px;padding:0 8px;gap:6px;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+  .hdr-row1::-webkit-scrollbar{display:none}
   #btn-toggle-sidebar{display:flex}
   .logo{font-size:.9rem}
   #user-email-lbl{display:none}
@@ -277,6 +295,14 @@ table.summary .high{color:var(--danger);font-weight:700}
 
   /* Status bar */
   .statusbar{font-size:.72rem;padding:3px 10px}
+
+  /* Workspace switcher: cap width; badge is redundant with the select */
+  #ws-select{max-width:110px}
+  #ws-badge{display:none!important}
+  #btn-leave-ws{font-size:.68rem;padding:3px 7px;height:24px}
+
+  /* Touch devices have no hover — keep physician delete buttons visible */
+  .doc-del{opacity:1}
 }
 </style>
 </head>
@@ -284,7 +310,7 @@ table.summary .high{color:var(--danger);font-weight:700}
 
 <!-- ── Auth Screen ─────────────────────────────────────────────── -->
 <div id="auth-screen">
-  <div class="auth-card">
+  <div class="auth-card" id="login-card">
     <div class="auth-logo">🩺 MedScheduler</div>
     <div class="auth-sub">Team Schedule Management</div>
     <label>Email address</label>
@@ -294,6 +320,16 @@ table.summary .high{color:var(--danger);font-weight:700}
     <div class="auth-err" id="auth-err"></div>
     <button class="btn-primary" id="btn-signin">Sign In</button>
     <button class="btn-link" id="btn-create">Create account instead</button>
+  </div>
+  <div class="auth-card" id="verify-card" style="display:none">
+    <div class="auth-logo">🩺 MedScheduler</div>
+    <div class="auth-sub">Verify your email</div>
+    <p class="verify-text">We sent a verification link to<br><strong id="verify-email"></strong></p>
+    <p class="verify-text" style="margin-top:8px;color:var(--muted)">Open the email, click the link, then continue below.</p>
+    <div class="auth-err" id="verify-err"></div>
+    <button class="btn-primary" id="btn-verified">I've verified — continue</button>
+    <button class="btn-link" id="btn-resend">Resend verification email</button>
+    <button class="btn-link" id="btn-verify-signout">Sign out</button>
   </div>
 </div>
 
@@ -314,7 +350,9 @@ table.summary .high{color:var(--danger);font-weight:700}
         <select id="ws-select" title="Switch workspace"></select>
       </div>
       <span id="ws-badge"></span>
+      <button id="btn-leave-ws" title="Leave this shared workspace">🚪 Leave</button>
       <div class="user-badge">
+        <button id="btn-notif" title="Notifications">🔔<span id="notif-badge"></span></button>
         <span id="user-email-lbl"></span>
         <button id="btn-signout">Sign out</button>
       </div>
@@ -435,14 +473,17 @@ table.summary .high{color:var(--danger);font-weight:700}
 <div class="modal-overlay" id="share-modal" style="display:none">
   <div class="modal">
     <h2>👥 Share My Schedule</h2>
-    <div class="share-hint">Invited users can view and edit your schedule.
-      They sign in with their own account using the email you invite.
-      Only you can manage this list.</div>
+    <div class="share-hint">Invited users receive an invitation they must
+      accept before they can view and edit your schedule. They sign in with
+      their own account using the email you invite. Only you can manage this list.</div>
     <label>Invite by email</label>
     <input type="email" id="share-email" placeholder="colleague@hospital.com" autocomplete="off">
     <div class="modal-err" id="share-err"></div>
     <button class="btn-ok" style="width:100%;margin-top:12px" id="share-add-btn">Invite</button>
-    <div id="share-list" style="margin-top:14px"></div>
+    <label style="margin-top:16px">Awaiting response</label>
+    <div id="share-pending"></div>
+    <label>Members</label>
+    <div id="share-list"></div>
     <div class="modal-footer">
       <button class="btn-cancel" id="share-close">Close</button>
     </div>
@@ -640,6 +681,20 @@ table.summary .high{color:var(--danger);font-weight:700}
   </div>
 </div>
 
+<!-- ── Notifications Modal ─────────────────────────────────────── -->
+<div class="modal-overlay" id="notif-modal" style="display:none">
+  <div class="modal">
+    <h2>🔔 Notifications</h2>
+    <div class="notif-subhead">Pending invitations</div>
+    <div id="notif-invites"></div>
+    <div class="notif-subhead">Activity</div>
+    <div id="notif-list"></div>
+    <div class="modal-footer">
+      <button class="btn-cancel" id="notif-close">Close</button>
+    </div>
+  </div>
+</div>
+
 <!-- ── Toast ───────────────────────────────────────────────────── -->
 <div class="toast" id="toast"></div>
 
@@ -654,6 +709,11 @@ const fbApp = firebase.initializeApp({
   appId:             "1:34915686489:web:2f62ad062e47558934f948"
 });
 const auth = firebase.auth();
+
+// Accounts created at/after this moment must verify their email before use.
+// Pre-existing accounts are grandfathered. MUST match VERIFICATION_CUTOFF_MS in app.py.
+// 2026-06-10T00:00:00Z
+const VERIFICATION_CUTOFF_MS = 1781049600000;
 
 // ── Default scheduling rules (mirrors ScheduleRules defaults in scheduler.py) ──
 const DEFAULT_RULES = {
@@ -679,8 +739,9 @@ const S = {
   idToken: null,
   C: null,  // constants from server
   editing: null,  // {pid, day}
-  wsId: null,        // active workspace id (uid of the workspace owner)
-  workspaces: null,  // {own:{id,owner_email,members}, shared:[{id,owner_email}]}
+  wsId: null,          // active workspace id (uid of the workspace owner)
+  workspaces: null,    // {own:{id,owner_email,members,invites}, shared:[...], invites:[...]}
+  notifications: null, // {items:[{id,type,actor_email,ws_id,created,read}], unread:n}
 };
 
 // ── Undo / Redo history ─────────────────────────────────────────────
@@ -817,13 +878,81 @@ async function doAuth(isCreate){
   if(!email||!pw){ $('auth-err').textContent='Please fill in both fields.'; return; }
   $('btn-signin').disabled=true; $('btn-signin').innerHTML='<span class="spinner"></span>Connecting…';
   try {
-    if(isCreate) await auth.createUserWithEmailAndPassword(email,pw);
-    else         await auth.signInWithEmailAndPassword(email,pw);
+    if(isCreate){
+      const cred = await auth.createUserWithEmailAndPassword(email,pw);
+      // New accounts must verify their email (gate lives in onAuthStateChanged)
+      try { await cred.user.sendEmailVerification(); } catch(_){}
+    } else {
+      await auth.signInWithEmailAndPassword(email,pw);
+    }
   } catch(e){
     $('auth-err').textContent = friendlyAuthError(e.code);
     $('btn-signin').disabled=false; $('btn-signin').textContent='Sign In';
   }
 }
+
+// ── Email verification gate (new accounts only — see VERIFICATION_CUTOFF_MS) ──
+function needsEmailVerification(user){
+  if(user.emailVerified) return false;
+  const created = Date.parse((user.metadata && user.metadata.creationTime) || '') || 0;
+  return created >= VERIFICATION_CUTOFF_MS;
+}
+
+function resetSigninBtn(){
+  $('btn-signin').disabled=false; $('btn-signin').textContent='Sign In';
+}
+
+function showVerifyScreen(user){
+  $('verify-email').textContent = user.email;
+  $('verify-err').textContent = '';
+  $('login-card').style.display='none';
+  $('verify-card').style.display='block';
+  $('auth-screen').style.display='flex';
+  $('app').classList.remove('visible');
+  resetSigninBtn();
+}
+
+function showLoginCard(){
+  $('verify-card').style.display='none';
+  $('login-card').style.display='block';
+}
+
+$('btn-verified').onclick = async()=>{
+  const u = auth.currentUser;
+  if(!u){ showLoginCard(); return; }
+  $('verify-err').textContent='';
+  $('btn-verified').disabled=true; $('btn-verified').innerHTML='<span class="spinner"></span>Checking…';
+  try {
+    await u.reload();
+    if(auth.currentUser && auth.currentUser.emailVerified){
+      location.reload();   // re-run auth flow with verified account
+      return;
+    }
+    $('verify-err').textContent='Not verified yet — click the link in the email first.';
+  } catch(e){
+    $('verify-err').textContent=friendlyAuthError(e.code)||e.message;
+  } finally {
+    $('btn-verified').disabled=false; $('btn-verified').textContent="I've verified — continue";
+  }
+};
+
+$('btn-resend').onclick = async()=>{
+  const u = auth.currentUser;
+  if(!u) return;
+  $('verify-err').textContent='';
+  try {
+    await u.sendEmailVerification();
+    toast('Verification email sent to '+u.email);
+    $('btn-resend').disabled=true;
+    setTimeout(()=>{ $('btn-resend').disabled=false; }, 30000);
+  } catch(e){
+    $('verify-err').textContent = e.code==='auth/too-many-requests'
+      ? 'Too many requests — please wait a minute before resending.'
+      : (friendlyAuthError(e.code)||e.message);
+  }
+};
+
+$('btn-verify-signout').onclick = ()=> auth.signOut();
 
 function friendlyAuthError(code){
   const m={
@@ -840,6 +969,8 @@ function friendlyAuthError(code){
 
 auth.onAuthStateChanged(async user => {
   if(user){
+    if(needsEmailVerification(user)){ showVerifyScreen(user); return; }
+    showLoginCard();   // make sure the verify card is hidden for next sign-out
     S.idToken = await user.getIdToken();
     // Refresh token every 50 min
     setInterval(async()=>{ S.idToken = await user.getIdToken(true); }, 50*60*1000);
@@ -850,10 +981,14 @@ auth.onAuthStateChanged(async user => {
     await initWorkspaces();
     await loadData();
     renderAll();
+    await refreshNotifications();
+    startNotifPolling();
   } else {
+    stopNotifPolling();
+    showLoginCard();
     $('auth-screen').style.display='flex';
     $('app').classList.remove('visible');
-    $('btn-signin').disabled=false; $('btn-signin').textContent='Sign In';
+    resetSigninBtn();
   }
 });
 
@@ -894,16 +1029,28 @@ function populateStaticDropdowns(){
 }
 
 // ── Workspaces ─────────────────────────────────────────────────────
+function applyWorkspaces(res){
+  // Returns true if the active workspace became invalid (revoked/left)
+  // and was switched back to the caller's own workspace.
+  S.workspaces = res;
+  const valid = [res.own.id, ...(res.shared||[]).map(w=>w.id)];
+  const lostAccess = !!(S.wsId && !valid.includes(S.wsId));
+  if(!S.wsId || lostAccess) S.wsId = res.own.id;
+  renderWsSwitcher();
+  updateNotifBadge();
+  return lostAccess;
+}
+
 async function initWorkspaces(){
-  // Fetch own + shared workspaces; default to the user's own workspace.
+  // Fetch own + shared + pending-invite workspaces.
   try {
-    S.workspaces = await api('GET','/api/workspaces');
-    S.wsId = S.workspaces.own.id;
+    return applyWorkspaces(await api('GET','/api/workspaces'));
   } catch(e){
     S.workspaces = null; S.wsId = null;
     toast('Could not load workspaces: '+e.message, 4000);
+    renderWsSwitcher();
+    return false;
   }
-  renderWsSwitcher();
 }
 
 function renderWsSwitcher(){
@@ -927,6 +1074,7 @@ function renderWsSwitcher(){
 
 function updateWsBadge(){
   const b=$('ws-badge');
+  $('btn-leave-ws').style.display = viewingOwnWorkspace() ? 'none' : 'inline-block';
   if(viewingOwnWorkspace()){ b.style.display='none'; b.textContent=''; return; }
   const w=(S.workspaces.shared||[]).find(x=>x.id===S.wsId);
   b.textContent='👥 Shared by '+((w&&w.owner_email)||'colleague');
@@ -959,7 +1107,6 @@ async function loadData(){
     } else {
       initDefaultData();
       setStatus('No cloud data – starting fresh.');
-      if(viewingOwnWorkspace()) await maybeOfferLegacyImport();
     }
     resetHistory();
   } catch(e){
@@ -968,56 +1115,39 @@ async function loadData(){
   }
 }
 
-async function maybeOfferLegacyImport(){
-  // One-time migration: own workspace is empty — offer to copy the old
-  // team-wide schedule into it. The legacy document is never modified.
-  const dismissKey = 'msched_legacy_import_dismissed';
-  try { if(localStorage.getItem(dismissKey)) return; } catch(_){}
-  if(!confirm('Your schedule is empty.\n\nImport the previous shared team schedule into your private workspace?')){
-    try { localStorage.setItem(dismissKey,'1'); } catch(_){}
-    return;
-  }
-  try {
-    await api('POST','/api/data/import-legacy');
-    const res = await api('GET','/api/data'+wsQuery());
-    if(res.data){ applyData(res.data); renderAll(); resetHistory(); }
-    toast('✓ Previous shared schedule imported');
-    setStatus('Imported previous shared schedule.');
-  } catch(e){
-    if(/No legacy shared data/i.test(e.message)){
-      try { localStorage.setItem(dismissKey,'1'); } catch(_){}
-      setStatus('No previous shared data to import – starting fresh.');
-    } else {
-      toast('Import failed: '+e.message, 5000);
-    }
-  }
-}
-
 // ── Share / invite members (operates on the user's OWN workspace) ──
-function renderShareList(){
-  const box=$('share-list'); box.innerHTML='';
-  const members=(S.workspaces && S.workspaces.own.members)||[];
-  if(!members.length){
+function renderShareEntries(boxId, emails, delLabel, emptyText){
+  const box=$(boxId); box.innerHTML='';
+  if(!emails.length){
     const d=document.createElement('div');
-    d.className='share-hint'; d.textContent='No one invited yet.';
+    d.className='share-hint'; d.textContent=emptyText;
     box.appendChild(d); return;
   }
-  members.forEach(em=>{
+  emails.forEach(em=>{
     const div=document.createElement('div'); div.className='leave-item';
     const name=document.createElement('span'); name.className='leave-name'; name.textContent=em;
-    const del=document.createElement('button'); del.className='leave-del'; del.textContent='✕ Remove';
+    const del=document.createElement('button'); del.className='leave-del'; del.textContent=delLabel;
     del.onclick=()=>shareAction('remove',em);
     div.appendChild(name); div.appendChild(del); box.appendChild(div);
   });
+}
+
+function renderShareList(){
+  const own=(S.workspaces && S.workspaces.own)||{};
+  renderShareEntries('share-pending', own.invites||[], '✕ Cancel', 'No pending invitations.');
+  renderShareEntries('share-list',    own.members||[], '✕ Remove', 'No members yet.');
 }
 
 async function shareAction(action,email){
   $('share-err').textContent='';
   try{
     const res=await api('POST','/api/workspaces/members',{action,email});
-    if(S.workspaces) S.workspaces.own.members=res.members;
+    if(S.workspaces){
+      S.workspaces.own.members=res.members;
+      S.workspaces.own.invites=res.invites||[];
+    }
     renderShareList();
-    toast(action==='add' ? '✓ Invited '+email : '✓ Removed '+email);
+    toast(action==='add' ? '✓ Invitation sent to '+email : '✓ Removed '+email);
   }catch(e){
     $('share-err').textContent=e.message;
   }
@@ -1036,6 +1166,143 @@ $('share-add-btn').onclick=async()=>{
   $('share-email').value='';
 };
 $('share-email').addEventListener('keydown',e=>{ if(e.key==='Enter') $('share-add-btn').click(); });
+
+// ── Notifications & invitations ───────────────────────────────────
+let notifTimer = null;
+
+function pendingInvites(){
+  return (S.workspaces && S.workspaces.invites) || [];
+}
+
+function updateNotifBadge(){
+  const n = ((S.notifications && S.notifications.unread) || 0) + pendingInvites().length;
+  const b = $('notif-badge');
+  if(n > 0){ b.textContent = n > 99 ? '99+' : String(n); b.style.display='inline-block'; }
+  else b.style.display='none';
+}
+
+async function refreshNotifications(silent=true){
+  try {
+    S.notifications = await api('GET','/api/notifications');
+    updateNotifBadge();
+    if($('notif-modal').style.display==='flex') renderNotifPanel();
+  } catch(e){
+    if(!silent) toast('Notifications error: '+e.message, 4000);
+  }
+}
+
+function notifLabel(it){
+  const who = it.actor_email || 'someone';
+  if(it.type==='invite_accepted') return who+' accepted your invitation';
+  if(it.type==='invite_declined') return who+' declined your invitation';
+  if(it.type==='member_left')     return who+' left your schedule';
+  return who+' · '+(it.type||'activity');
+}
+
+function notifTime(iso){
+  const d=new Date(iso); if(isNaN(d)) return '';
+  const mins=Math.floor((Date.now()-d.getTime())/60000);
+  if(mins<1)  return 'just now';
+  if(mins<60) return mins+'m ago';
+  const hrs=Math.floor(mins/60);
+  if(hrs<24)  return hrs+'h ago';
+  return d.toLocaleDateString();
+}
+
+function renderNotifPanel(){
+  const invBox=$('notif-invites'); invBox.innerHTML='';
+  const inv=pendingInvites();
+  if(!inv.length){
+    invBox.innerHTML='<div class="notif-empty">No pending invitations.</div>';
+  } else inv.forEach(w=>{
+    const div=document.createElement('div'); div.className='notif-item unread';
+    const span=document.createElement('span');
+    span.textContent=(w.owner_email||w.id)+' invited you to their schedule';
+    const actions=document.createElement('div'); actions.className='notif-actions';
+    const acc=document.createElement('button'); acc.className='btn-accept'; acc.textContent='Accept';
+    acc.onclick=()=>respondInvite(w.id,'accept');
+    const dec=document.createElement('button'); dec.className='btn-decline'; dec.textContent='Decline';
+    dec.onclick=()=>respondInvite(w.id,'decline');
+    actions.appendChild(acc); actions.appendChild(dec);
+    div.appendChild(span); div.appendChild(actions); invBox.appendChild(div);
+  });
+  const list=$('notif-list'); list.innerHTML='';
+  const items=(S.notifications && S.notifications.items)||[];
+  if(!items.length){
+    list.innerHTML='<div class="notif-empty">Nothing yet.</div>';
+    return;
+  }
+  items.forEach(it=>{
+    const div=document.createElement('div');
+    div.className='notif-item'+(it.read?'':' unread');
+    const span=document.createElement('span'); span.textContent=notifLabel(it);
+    const time=document.createElement('span'); time.className='notif-time'; time.textContent=notifTime(it.created);
+    div.appendChild(span); div.appendChild(time); list.appendChild(div);
+  });
+}
+
+async function respondInvite(wsId, action){
+  try {
+    await api('POST','/api/invitations/respond',{ws_id:wsId, action});
+    toast(action==='accept' ? '✓ Invitation accepted — workspace added' : 'Invitation declined');
+    await initWorkspaces();
+    renderNotifPanel();
+  } catch(e){
+    toast('Could not respond: '+e.message, 4000);
+    await initWorkspaces();   // invite may have been revoked meanwhile
+    renderNotifPanel();
+  }
+}
+
+$('btn-notif').onclick = async()=>{
+  $('notif-modal').style.display='flex';
+  renderNotifPanel();                  // show cached state immediately
+  await refreshNotifications(false);   // then refresh from server
+  const unreadIds=((S.notifications && S.notifications.items)||[])
+    .filter(i=>!i.read).map(i=>i.id);
+  if(unreadIds.length){
+    try {
+      await api('POST','/api/notifications/read',{ids:unreadIds});
+      S.notifications.items.forEach(i=>{ i.read=true; });
+      S.notifications.unread=0;
+      updateNotifBadge();              // badge clears; highlights stay until close
+    } catch(_){}
+  }
+};
+$('notif-close').onclick = ()=>{ $('notif-modal').style.display='none'; };
+
+function startNotifPolling(){
+  stopNotifPolling();
+  notifTimer = setInterval(async()=>{
+    try {
+      const lost = applyWorkspaces(await api('GET','/api/workspaces'));
+      if(lost){
+        toast('Access to the shared schedule ended — switched to My Schedule', 4000);
+        await loadData(); renderAll();
+      }
+    } catch(_){}
+    await refreshNotifications();
+  }, 60000);
+}
+function stopNotifPolling(){
+  if(notifTimer){ clearInterval(notifTimer); notifTimer=null; }
+}
+
+$('btn-leave-ws').onclick = async()=>{
+  if(viewingOwnWorkspace()) return;
+  const w=(S.workspaces.shared||[]).find(x=>x.id===S.wsId);
+  const name=(w && w.owner_email) || 'the owner';
+  if(!confirm('Leave '+name+"'s shared schedule?\n\nYou will lose access until you are invited again.")) return;
+  try {
+    await api('POST','/api/workspaces/leave',{ws_id:S.wsId});
+    toast('✓ You left the shared schedule');
+    S.wsId=(S.workspaces && S.workspaces.own.id)||null;
+    await initWorkspaces();
+    await loadData(); renderAll();
+  } catch(e){
+    toast('Could not leave: '+e.message, 4000);
+  }
+};
 
 function applyData(d){
   S.yr=d.yr||S.yr; S.mo=d.mo||S.mo;
@@ -1185,14 +1452,15 @@ function renderSchedule(){
     let hrs=0;
     for(let d=1;d<=td;d++) hrs+=(S.C.shifts[getAsgn(ph.id,d)]?.h||0);
     const tdHrs=document.createElement('td'); tdHrs.className='col-hrs';
-    tdHrs.textContent=hrs; if(hrs>160) tdHrs.style.color='#dc2626'; tr.appendChild(tdHrs);
+    const maxHrs=(S.rules&&S.rules.max_hours)||DEFAULT_RULES.max_hours;
+    tdHrs.textContent=hrs; if(hrs>maxHrs) tdHrs.style.color='var(--danger)'; tr.appendChild(tdHrs);
     // Day cells
     for(let d=1;d<=td;d++){
       const code=getAsgn(ph.id,d);
       const td2=document.createElement('td');
       td2.className='day-cell'+(isWeekend(S.yr,S.mo,d)?' weekend-row':'');
       td2.textContent=S.C.shifts[code]?.short||'';
-      td2.style.background='#'+S.C.color_map[code]||'fff';
+      td2.style.background='#'+(S.C.color_map[code]||'fff');
       td2.dataset.pid=ph.id; td2.dataset.day=d;
       td2.onclick=openCellEdit;
       tr.appendChild(td2);
@@ -1366,7 +1634,7 @@ async function renderSummary(){
       cols.forEach(c=>{
         const td=document.createElement('td');
         td.textContent=row[c]??'';
-        if(c==='total'&&row[c]>160) td.className='high';
+        if(c==='total'&&row[c]>((S.rules&&S.rules.max_hours)||DEFAULT_RULES.max_hours)) td.className='high';
         tr.appendChild(td);
       });
       tbody.appendChild(tr);
@@ -1840,7 +2108,7 @@ $('shifts-reset').onclick = () => {
 $('btn-shifts').onclick = openShiftsModal;
 
 // ── Close modals on overlay click ─────────────────
-['cell-modal','leave-modal','block-modal','manual-modal','rules-modal','shifts-modal'].forEach(id=>{
+['cell-modal','leave-modal','block-modal','manual-modal','rules-modal','shifts-modal','notif-modal'].forEach(id=>{
   $(id).addEventListener('click',e=>{ if(e.target===$(id)) $(id).style.display='none'; });
 });
 

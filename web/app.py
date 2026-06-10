@@ -15,6 +15,7 @@ import os
 import urllib.request
 import urllib.parse
 import urllib.error
+from datetime import datetime, timezone
 from functools import wraps
 from typing import Any, Dict, List, Optional
 
@@ -37,7 +38,11 @@ FIREBASE_API_KEY  = "AIzaSyC_d-HgnEnLAWW1f3dSKjuuAz4eplcVWz8"
 PROJECT_ID        = "medscheduler-e0853"
 FIRESTORE_BASE    = (f"https://firestore.googleapis.com/v1/projects/{PROJECT_ID}"
                      f"/databases/(default)/documents")
-LEGACY_DOC        = f"{FIRESTORE_BASE}/shared/schedule"   # old team-wide doc, read-only
+
+# Accounts created at/after this moment (epoch ms, 2026-06-10T00:00:00Z) must
+# have a verified email; accounts created before it are grandfathered.
+# MUST match VERIFICATION_CUTOFF_MS in templates/index.html.
+VERIFICATION_CUTOFF_MS = 1781049600000
 
 def ws_meta_url(ws_id: str) -> str:
     """Workspace meta/ACL document (owner_uid, owner_email, members)."""
@@ -128,8 +133,34 @@ def fs_save(id_token: str, url: str, payload: Dict) -> None:
         raise FsError(code, data["error"].get("message", "Firestore write error"))
 
 
-def fs_query_shared_workspaces(id_token: str, email: str) -> List[Dict]:
-    """Return workspaces whose members array contains `email`.
+def fs_create(id_token: str, parent_url: str, payload: Dict) -> str:
+    """Create a document with an auto-generated id; returns the new id."""
+    body = json.dumps({"fields": _py_to_fs(payload)["mapValue"]["fields"]}).encode()
+    data = _http_json("POST", parent_url, body=body,
+                      headers={"Authorization": f"Bearer {id_token}"}, timeout=20)
+    if "error" in data:
+        code = data["error"].get("code", 0)
+        raise FsError(code, data["error"].get("message", "Firestore create error"))
+    return data.get("name", "").rsplit("/", 1)[-1]
+
+
+def fs_patch_fields(id_token: str, doc_url: str, fields: Dict) -> None:
+    """PATCH only the given fields of an existing document (updateMask +
+    exists precondition, so a bad id can never create a stray document)."""
+    mask = "&".join("updateMask.fieldPaths=" + urllib.parse.quote(k) for k in fields)
+    url  = f"{doc_url}?{mask}&currentDocument.exists=true"
+    body = json.dumps({"fields": {k: _py_to_fs(v) for k, v in fields.items()}}).encode()
+    data = _http_json("PATCH", url, body=body,
+                      headers={"Authorization": f"Bearer {id_token}"}, timeout=20)
+    if "error" in data:
+        code = data["error"].get("code", 0)
+        raise FsError(code, data["error"].get("message", "Firestore patch error"))
+
+
+def fs_query_shared_workspaces(id_token: str, email: str,
+                               field: str = "members") -> List[Dict]:
+    """Return workspaces whose `field` array (members or invites) contains
+    `email`.
 
     Uses Firestore runQuery; the security rules allow this list operation
     only when the query is constrained to the caller's own email.
@@ -139,7 +170,7 @@ def fs_query_shared_workspaces(id_token: str, email: str) -> List[Dict]:
             "from": [{"collectionId": "workspaces"}],
             "where": {
                 "fieldFilter": {
-                    "field": {"fieldPath": "members"},
+                    "field": {"fieldPath": field},
                     "op":    "ARRAY_CONTAINS",
                     "value": {"stringValue": email},
                 }
@@ -160,6 +191,33 @@ def fs_query_shared_workspaces(id_token: str, email: str) -> List[Dict]:
         fields["_id"] = doc["name"].rsplit("/", 1)[-1]
         results.append(fields)
     return results
+
+
+def fs_query_notifications(id_token: str, uid: str, limit: int = 50) -> List[Dict]:
+    """Return the user's notifications, newest first."""
+    body = json.dumps({
+        "structuredQuery": {
+            "from": [{"collectionId": "items"}],
+            "orderBy": [{"field": {"fieldPath": "created"},
+                         "direction": "DESCENDING"}],
+            "limit": limit,
+        }
+    }).encode()
+    data = _http_json("POST", f"{FIRESTORE_BASE}/notifications/{uid}:runQuery",
+                      body=body,
+                      headers={"Authorization": f"Bearer {id_token}"}, timeout=20)
+    if isinstance(data, dict) and "error" in data:
+        code = data["error"].get("code", 0)
+        raise FsError(code, data["error"].get("message", "Firestore query error"))
+    items = []
+    for item in (data if isinstance(data, list) else []):
+        doc = item.get("document")
+        if not doc:
+            continue
+        fields = _fs_to_py({"mapValue": {"fields": doc.get("fields", {})}})
+        fields["id"] = doc["name"].rsplit("/", 1)[-1]
+        items.append(fields)
+    return items
 
 
 # ── Firebase token verification ───────────────────────────────────────────────
@@ -186,6 +244,14 @@ def require_auth(f):
         user  = verify_token(token)
         if user is None:
             return jsonify({"error": "Invalid or expired token"}), 401
+        # Email verification: required for accounts created after the cutoff
+        # (identitytoolkit lookup returns createdAt in epoch ms and emailVerified).
+        try:
+            created_ms = int(user.get("createdAt", "0"))
+        except (TypeError, ValueError):
+            created_ms = 0
+        if created_ms >= VERIFICATION_CUTOFF_MS and not user.get("emailVerified", False):
+            return jsonify({"error": "email-not-verified"}), 403
         return f(token, user, *args, **kwargs)
     return wrapper
 
@@ -378,7 +444,8 @@ def _ensure_own_meta(token: str, user: Dict) -> Dict:
     """Load the caller's workspace meta doc, creating it on first login."""
     meta = fs_load(token, ws_meta_url(_uid(user)))
     if meta is None:
-        meta = {"owner_uid": _uid(user), "owner_email": _email(user), "members": []}
+        meta = {"owner_uid": _uid(user), "owner_email": _email(user),
+                "members": [], "invites": []}
         fs_save(token, ws_meta_url(_uid(user)), meta)
     return meta
 
@@ -388,28 +455,35 @@ def _ensure_own_meta(token: str, user: Dict) -> Dict:
 def api_workspaces(token, user):
     try:
         meta = _ensure_own_meta(token, user)
-        shared = []
+        shared, pending = [], []
         email = _email(user)
         if email:
             for ws in fs_query_shared_workspaces(token, email):
                 if ws.get("_id") and ws["_id"] != _uid(user):
                     shared.append({"id": ws["_id"],
                                    "owner_email": ws.get("owner_email", "")})
+            for ws in fs_query_shared_workspaces(token, email, field="invites"):
+                if ws.get("_id") and ws["_id"] != _uid(user):
+                    pending.append({"id": ws["_id"],
+                                    "owner_email": ws.get("owner_email", "")})
     except FsError as exc:
         return jsonify({"error": str(exc)}), exc.http_status()
     return jsonify({
         "own": {"id": _uid(user), "owner_email": _email(user),
-                "members": meta.get("members", [])},
+                "members": meta.get("members", []),
+                "invites": meta.get("invites", [])},
         "shared": shared,
+        "invites": pending,
     })
 
 
 @app.route("/api/workspaces/members", methods=["POST"])
 @require_auth
 def api_workspace_members(token, user):
-    """Owner-only: add or remove a member email on the caller's own workspace.
-    Ownership is also enforced by Firestore rules (writes target the caller's
-    own meta doc and rules reject non-owner updates)."""
+    """Owner-only: invite an email (pending until accepted) or remove an
+    email (cancels a pending invite and/or revokes membership). Ownership is
+    also enforced by Firestore rules (writes target the caller's own meta doc
+    and rules reject non-owner updates)."""
     body   = request.get_json(force=True)
     action = str(body.get("action", "")).strip().lower()
     member = str(body.get("email", "")).strip().lower()
@@ -422,15 +496,21 @@ def api_workspace_members(token, user):
     try:
         meta = _ensure_own_meta(token, user)
         members = list(meta.get("members", []))
-        if action == "add" and member not in members:
-            members.append(member)
-        elif action == "remove":
+        invites = list(meta.get("invites", []))
+        if action == "add":
+            if member in members:
+                return jsonify({"error": "Already a member"}), 400
+            if member not in invites:
+                invites.append(member)
+        else:  # remove
             members = [m for m in members if m != member]
+            invites = [m for m in invites if m != member]
         meta["members"] = members
+        meta["invites"] = invites
         fs_save(token, ws_meta_url(_uid(user)), meta)
     except FsError as exc:
         return jsonify({"error": str(exc)}), exc.http_status()
-    return jsonify({"ok": True, "members": members})
+    return jsonify({"ok": True, "members": members, "invites": invites})
 
 
 @app.route("/api/data", methods=["GET"])
@@ -460,24 +540,126 @@ def api_save(token, user):
     return jsonify({"ok": True, "ws": ws})
 
 
-@app.route("/api/data/import-legacy", methods=["POST"])
-@require_auth
-def api_import_legacy(token, user):
-    """One-time migration: copy the legacy shared/schedule doc into the
-    caller's own (empty) workspace. The legacy doc is never modified."""
-    uid = _uid(user)
+def _notify(token: str, recipient_uid: str, ntype: str, actor_email: str,
+            ws_id: str) -> bool:
+    """Write a notification into the recipient's feed. Best-effort: returns
+    False instead of raising so a failed notification never rolls back the
+    membership change it reports on."""
     try:
-        own = fs_load(token, ws_data_url(uid))
-        if own and (own.get("docs") or own.get("asgn")):
-            return jsonify({"error": "Workspace is not empty — import refused"}), 409
-        legacy = fs_load(token, LEGACY_DOC)
-        if legacy is None:
-            return jsonify({"error": "No legacy shared data found"}), 404
-        _ensure_own_meta(token, user)
-        fs_save(token, ws_data_url(uid), legacy)
+        fs_create(token, f"{FIRESTORE_BASE}/notifications/{recipient_uid}/items", {
+            "type":        ntype,
+            "actor_email": actor_email,
+            "ws_id":       ws_id,
+            "created":     datetime.now(timezone.utc).isoformat(),
+            "read":        False,
+        })
+        return True
+    except FsError:
+        return False
+
+
+def _ws_from_body(body: Dict, user: Dict) -> Optional[str]:
+    """Validated foreign workspace id from a JSON body (never the caller's own)."""
+    ws = str(body.get("ws_id", "")).strip()
+    if not ws or not ws.isalnum() or len(ws) > 128 or ws == _uid(user):
+        return None
+    return ws
+
+
+@app.route("/api/invitations/respond", methods=["POST"])
+@require_auth
+def api_invitation_respond(token, user):
+    """Invited user accepts or declines a pending invitation. The meta-doc
+    transition is enforced server-side here and by Firestore rules
+    (self-service diff: only the caller's own email may move)."""
+    body   = request.get_json(force=True)
+    action = str(body.get("action", "")).strip().lower()
+    ws     = _ws_from_body(body, user)
+    if action not in ("accept", "decline"):
+        return jsonify({"error": "action must be 'accept' or 'decline'"}), 400
+    if ws is None:
+        return jsonify({"error": "Invalid workspace id"}), 400
+    email = _email(user)
+    try:
+        meta = fs_load(token, ws_meta_url(ws))
+        if meta is None:
+            return jsonify({"error": "Workspace not found"}), 404
+        invites = list(meta.get("invites", []))
+        members = list(meta.get("members", []))
+        if email not in invites:
+            return jsonify({"error": "No pending invitation for this workspace"}), 404
+        invites = [m for m in invites if m != email]
+        if action == "accept" and email not in members:
+            members.append(email)
+        meta["invites"] = invites
+        meta["members"] = members
+        fs_save(token, ws_meta_url(ws), meta)
     except FsError as exc:
         return jsonify({"error": str(exc)}), exc.http_status()
-    return jsonify({"ok": True})
+    ntype = "invite_accepted" if action == "accept" else "invite_declined"
+    notified = _notify(token, ws, ntype, email, ws)
+    return jsonify({"ok": True, "action": action, "notified": notified})
+
+
+@app.route("/api/workspaces/leave", methods=["POST"])
+@require_auth
+def api_workspace_leave(token, user):
+    """Accepted member leaves a workspace they do not own."""
+    body = request.get_json(force=True)
+    ws   = _ws_from_body(body, user)
+    if ws is None:
+        return jsonify({"error": "Invalid workspace id"}), 400
+    email = _email(user)
+    try:
+        meta = fs_load(token, ws_meta_url(ws))
+        if meta is None:
+            return jsonify({"error": "Workspace not found"}), 404
+        members = list(meta.get("members", []))
+        if email not in members:
+            return jsonify({"error": "You are not a member of this workspace"}), 404
+        meta["members"] = [m for m in members if m != email]
+        meta["invites"] = list(meta.get("invites", []))
+        fs_save(token, ws_meta_url(ws), meta)
+    except FsError as exc:
+        return jsonify({"error": str(exc)}), exc.http_status()
+    notified = _notify(token, ws, "member_left", email, ws)
+    return jsonify({"ok": True, "notified": notified})
+
+
+@app.route("/api/notifications", methods=["GET"])
+@require_auth
+def api_notifications(token, user):
+    """The caller's notifications, newest first, plus an unread count."""
+    try:
+        items = fs_query_notifications(token, _uid(user))
+    except FsError as exc:
+        return jsonify({"error": str(exc)}), exc.http_status()
+    unread = sum(1 for i in items if not i.get("read"))
+    return jsonify({"items": items, "unread": unread})
+
+
+@app.route("/api/notifications/read", methods=["POST"])
+@require_auth
+def api_notifications_read(token, user):
+    """Mark the given notification ids as read (best-effort per id)."""
+    body = request.get_json(force=True)
+    ids  = body.get("ids", [])
+    if not isinstance(ids, list) or not ids or len(ids) > 100:
+        return jsonify({"error": "ids must be a non-empty list (max 100)"}), 400
+    updated = 0
+    for nid in ids:
+        nid = str(nid)
+        if not nid.isalnum() or len(nid) > 128:
+            continue
+        try:
+            fs_patch_fields(
+                token,
+                f"{FIRESTORE_BASE}/notifications/{_uid(user)}/items/{nid}",
+                {"read": True})
+            updated += 1
+        except FsError:
+            continue
+    return jsonify({"ok": True, "updated": updated})
 
 
 @app.route("/api/schedule", methods=["POST"])
