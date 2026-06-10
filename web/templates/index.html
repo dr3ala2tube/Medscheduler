@@ -374,6 +374,7 @@ table.summary .high{color:var(--danger);font-weight:700}
       <button class="hdr-btn" id="btn-save">☁ Save</button>
       <button class="hdr-btn" id="btn-load">⬇ Load</button>
       <button class="hdr-btn" id="btn-share">👥 Share</button>
+      <button class="hdr-btn" id="btn-history">📜 History</button>
       <div class="hdr-sep"></div>
       <button class="hdr-btn" id="undoBtn" type="button" disabled>↶ Undo</button>
       <button class="hdr-btn" id="redoBtn" type="button" disabled>↷ Redo</button>
@@ -450,6 +451,20 @@ table.summary .high{color:var(--danger);font-weight:700}
     <div class="modal-footer">
       <button class="btn-cancel" id="cell-cancel">Cancel</button>
       <button class="btn-ok" id="cell-ok">Apply</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── History Modal ───────────────────────────────────────────── -->
+<div class="modal-overlay" id="history-modal" style="display:none">
+  <div class="modal">
+    <h2>📜 Schedule History</h2>
+    <div style="font-size:.85rem;color:var(--muted);margin-bottom:8px">
+      Who changed what, when — recorded on every cloud save (latest 50, web saves only).
+    </div>
+    <div id="history-list" style="max-height:55vh;overflow:auto"></div>
+    <div class="modal-footer">
+      <button class="btn-cancel" id="history-close">Close</button>
     </div>
   </div>
 </div>
@@ -1403,9 +1418,12 @@ function serializeState(){
 $('btn-save').onclick = async()=>{
   $('btn-save').disabled=true; $('btn-save').innerHTML='<span class="spinner"></span>Saving…';
   try {
-    await api('POST','/api/data'+wsQuery(),serializeState());
+    const res=await api('POST','/api/data'+wsQuery(),serializeState());
     const n=computeConflicts().list.length;
-    toast(n?('⚠ Saved to cloud — '+n+' scheduling conflict'+(n>1?'s':'')):'✓ Saved to cloud', n?4200:2800);
+    let msg=n?('⚠ Saved to cloud — '+n+' scheduling conflict'+(n>1?'s':'')):'✓ Saved to cloud';
+    const noAudit=!!(res&&res.audited===false);
+    if(noAudit) msg+=' — history entry could not be recorded';
+    toast(msg,(n>0||noAudit)?4200:2800);
   }
   catch(e){ toast('Save failed: '+e.message,4000); }
   finally { $('btn-save').disabled=false; $('btn-save').textContent='☁ Save'; }
@@ -2219,8 +2237,73 @@ $('conflict-chip').onclick=()=>{
 };
 $('conflict-close').onclick=()=>{ $('conflict-modal').style.display='none'; };
 
+// ── History modal (audit trail, D12/D13) ────────────
+function relTime(iso){
+  const t=Date.parse(iso); if(isNaN(t)) return iso||'';
+  const s=Math.floor((Date.now()-t)/1000);
+  if(s<60) return 'just now';
+  if(s<3600) return Math.floor(s/60)+' min ago';
+  if(s<86400) return Math.floor(s/3600)+' h ago';
+  if(s<604800) return Math.floor(s/86400)+' d ago';
+  return new Date(t).toLocaleDateString();
+}
+$('btn-history').onclick=async()=>{
+  const div=$('history-list'); div.innerHTML='';
+  const note=document.createElement('div');
+  note.style.cssText='color:var(--muted);font-size:.85rem';
+  note.textContent='Loading…'; div.appendChild(note);
+  $('history-modal').style.display='flex';
+  try{
+    const res=await api('GET','/api/audit'+wsQuery());
+    div.innerHTML='';
+    const items=(res&&res.items)||[];
+    if(!items.length){
+      const e=document.createElement('div');
+      e.style.cssText='color:var(--muted);font-size:.85rem';
+      e.textContent='No history yet — an entry is recorded on every cloud save.';
+      div.appendChild(e); return;
+    }
+    items.forEach(it=>{
+      const box=document.createElement('details');
+      box.style.cssText='border:1px solid var(--border);border-radius:6px;margin-bottom:6px;padding:6px 9px;font-size:.85rem';
+      const sum=document.createElement('summary');
+      sum.style.cssText='cursor:pointer';
+      const who=document.createElement('b'); who.textContent=it.actor_email||'?';
+      const when=document.createElement('span');
+      when.style.cssText='color:var(--muted);font-size:.78rem;margin:0 6px';
+      when.textContent=relTime(it.created); when.title=it.created||'';
+      const what=document.createElement('span'); what.textContent=it.summary||'';
+      sum.appendChild(who); sum.appendChild(when); sum.appendChild(what);
+      box.appendChild(sum);
+      const body=document.createElement('div');
+      body.style.cssText='margin-top:6px;padding-left:14px';
+      const changes=it.changes||[];
+      if(changes.length){
+        changes.forEach(c=>{
+          const line=document.createElement('div');
+          line.style.cssText='font-size:.8rem;padding:1px 0';
+          line.textContent=c; body.appendChild(line);
+        });
+      } else {
+        const line=document.createElement('div');
+        line.style.cssText='font-size:.8rem;color:var(--muted)';
+        line.textContent='(no line-level details)'; body.appendChild(line);
+      }
+      box.appendChild(body);
+      div.appendChild(box);
+    });
+  }catch(e){
+    div.innerHTML='';
+    const err=document.createElement('div');
+    err.style.cssText='color:var(--danger);font-size:.85rem';
+    err.textContent='Could not load history: '+e.message;
+    div.appendChild(err);
+  }
+};
+$('history-close').onclick=()=>{ $('history-modal').style.display='none'; };
+
 // ── Close modals on overlay click ─────────────────
-['cell-modal','leave-modal','block-modal','manual-modal','rules-modal','shifts-modal','notif-modal','conflict-modal'].forEach(id=>{
+['cell-modal','leave-modal','block-modal','manual-modal','rules-modal','shifts-modal','notif-modal','conflict-modal','history-modal'].forEach(id=>{
   $(id).addEventListener('click',e=>{ if(e.target===$(id)) $(id).style.display='none'; });
 });
 
