@@ -1,6 +1,6 @@
 # PROJECT_MAP.md
 
-Last updated: 2026-06-10 — **M1 + M2 complete** (branch `feature/private-workspaces`). M3 (sharing UI) pending. Firestore rules NOT yet deployed — deploy together with code after M3.
+Last updated: 2026-06-10 — **M1 + M2 + M3 complete** (branch `feature/private-workspaces`). M4 (live two-account verification) pending. Firestore rules NOT yet deployed — deploy rules + code together, then run M4.
 
 ## [TECH_STACK]
 
@@ -118,9 +118,9 @@ All Firestore calls keep the existing pattern: user's ID token, urllib REST, `_p
 - **M2 — Frontend workspace plumbing — DONE 2026-06-10**
   - index.html: `S.wsId`/`S.workspaces` state, `initWorkspaces()` on login, `wsQuery()` on all 4 data load/save call sites, `maybeOfferLegacyImport()` (one-time prompt for empty own workspace; declines and no-legacy remembered via localStorage flag `msched_legacy_import_dismissed`)
   - Verified: node --check on extracted inline JS, Flask render test confirms all hooks + complete document. Live two-account check deferred to M4 (needs rules deploy)
-- **M3 — Sharing UI**
-  - Share modal (add/remove member emails), workspace switcher, "Shared by" badge
-  - Pass: A invites B → B sees A's workspace in switcher, can edit and save; A removes B → B loses access (next load fails / workspace disappears)
+- **M3 — Sharing UI — DONE 2026-06-10**
+  - index.html: workspace switcher `#ws-select` in header row 1 (hidden unless ≥1 shared workspace), `#ws-badge` "Shared by <owner>" chip, `👥 Share` button in row 2, Share modal (invite by email / remove, wired to POST /api/workspaces/members), `renderWsSwitcher/updateWsBadge/renderShareList/shareAction`
+  - Verified: node --check on inline JS, all 10 new element ids present, Flask render test complete-document check. Live pass criteria (A invites B → B edits; A removes B → access lost) moved to M4 matrix
 - **M4 — Verification + docs (V2)**
   - End-to-end manual test matrix with two accounts (own/shared/revoked/unauthenticated)
   - Update PROJECT_STATE.md (rules, data paths, access-control section); update [ORPHANS]
@@ -130,5 +130,4 @@ All Firestore calls keep the existing pattern: user's ID token, urllib REST, `_p
 
 ## [ORPHANS]
 
-- Desktop app (`medscheduler_refactored.py`, `firebase_service.py`) still targets `shared/schedule`; will become read-only after rules deploy → desktop cloud-save breaks until it is migrated to the workspace model (separate task, needs explicit approval).
-- Firebase web API key hardcoded in `app.py`/`index.html` and also expected as env var per DEPLOY.md — harmless (web API keys are public identifiers) but inconsi
+- Desktop app (`medscheduler_refactored.py`, `firebase_service.py`) still targets `

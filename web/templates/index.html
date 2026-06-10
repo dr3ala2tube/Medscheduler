@@ -59,6 +59,11 @@ header{background:var(--primary);color:#fff;display:flex;flex-direction:column;f
 .hdr-sep{width:1px;height:22px;background:rgba(255,255,255,.25);margin:0 2px;flex-shrink:0}
 .user-badge{margin-left:auto;display:flex;align-items:center;gap:8px;font-size:.82rem;opacity:.9;white-space:nowrap}
 .user-badge button{background:rgba(255,255,255,.2);border:none;color:#fff;padding:4px 10px;border-radius:6px;font-size:.78rem;cursor:pointer}
+.ws-switch{display:none;align-items:center;gap:6px}
+#ws-select{padding:4px 8px;border:none;border-radius:6px;font-size:.8rem;background:rgba(255,255,255,.2);color:#fff;cursor:pointer;max-width:230px}
+#ws-select option{color:#1a202c}
+#ws-badge{display:none;font-size:.74rem;background:rgba(255,255,255,.25);padding:3px 9px;border-radius:10px;white-space:nowrap}
+.share-hint{font-size:.82rem;color:var(--muted);margin-bottom:2px;line-height:1.45}
 
 /* ── Body ──────────────────────────────────────────────────────── */
 .body{display:flex;flex:1;overflow:hidden}
@@ -305,6 +310,10 @@ table.summary .high{color:var(--danger);font-weight:700}
         <span id="month-label">April 2026</span>
         <button id="next-month" title="Next month">▶</button>
       </div>
+      <div class="ws-switch" id="ws-switch">
+        <select id="ws-select" title="Switch workspace"></select>
+      </div>
+      <span id="ws-badge"></span>
       <div class="user-badge">
         <span id="user-email-lbl"></span>
         <button id="btn-signout">Sign out</button>
@@ -322,6 +331,7 @@ table.summary .high{color:var(--danger);font-weight:700}
       <div class="hdr-sep"></div>
       <button class="hdr-btn" id="btn-save">☁ Save</button>
       <button class="hdr-btn" id="btn-load">⬇ Load</button>
+      <button class="hdr-btn" id="btn-share">👥 Share</button>
       <div class="hdr-sep"></div>
       <button class="hdr-btn" id="undoBtn" type="button" disabled>↶ Undo</button>
       <button class="hdr-btn" id="redoBtn" type="button" disabled>↷ Redo</button>
@@ -417,6 +427,24 @@ table.summary .high{color:var(--danger);font-weight:700}
     <div id="leave-list" style="margin-top:14px"></div>
     <div class="modal-footer">
       <button class="btn-cancel" id="leave-close">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Share Modal ─────────────────────────────────────────────── -->
+<div class="modal-overlay" id="share-modal" style="display:none">
+  <div class="modal">
+    <h2>👥 Share My Schedule</h2>
+    <div class="share-hint">Invited users can view and edit your schedule.
+      They sign in with their own account using the email you invite.
+      Only you can manage this list.</div>
+    <label>Invite by email</label>
+    <input type="email" id="share-email" placeholder="colleague@hospital.com" autocomplete="off">
+    <div class="modal-err" id="share-err"></div>
+    <button class="btn-ok" style="width:100%;margin-top:12px" id="share-add-btn">Invite</button>
+    <div id="share-list" style="margin-top:14px"></div>
+    <div class="modal-footer">
+      <button class="btn-cancel" id="share-close">Close</button>
     </div>
   </div>
 </div>
@@ -875,7 +903,42 @@ async function initWorkspaces(){
     S.workspaces = null; S.wsId = null;
     toast('Could not load workspaces: '+e.message, 4000);
   }
+  renderWsSwitcher();
 }
+
+function renderWsSwitcher(){
+  const wrap=$('ws-switch'), sel=$('ws-select');
+  if(!S.workspaces || !S.workspaces.shared.length){
+    wrap.style.display='none'; updateWsBadge(); return;
+  }
+  sel.innerHTML='';
+  const own=document.createElement('option');
+  own.value=S.workspaces.own.id; own.textContent='My Schedule';
+  sel.appendChild(own);
+  S.workspaces.shared.forEach(w=>{
+    const o=document.createElement('option');
+    o.value=w.id; o.textContent='Shared: '+(w.owner_email||w.id);
+    sel.appendChild(o);
+  });
+  sel.value=S.wsId;
+  wrap.style.display='flex';
+  updateWsBadge();
+}
+
+function updateWsBadge(){
+  const b=$('ws-badge');
+  if(viewingOwnWorkspace()){ b.style.display='none'; b.textContent=''; return; }
+  const w=(S.workspaces.shared||[]).find(x=>x.id===S.wsId);
+  b.textContent='👥 Shared by '+((w&&w.owner_email)||'colleague');
+  b.style.display='inline-block';
+}
+
+$('ws-select').onchange = async e=>{
+  S.wsId = e.target.value;
+  updateWsBadge();
+  await loadData();
+  renderAll();
+};
 
 function viewingOwnWorkspace(){
   return !S.workspaces || S.wsId === S.workspaces.own.id;
@@ -929,6 +992,50 @@ async function maybeOfferLegacyImport(){
     }
   }
 }
+
+// ── Share / invite members (operates on the user's OWN workspace) ──
+function renderShareList(){
+  const box=$('share-list'); box.innerHTML='';
+  const members=(S.workspaces && S.workspaces.own.members)||[];
+  if(!members.length){
+    const d=document.createElement('div');
+    d.className='share-hint'; d.textContent='No one invited yet.';
+    box.appendChild(d); return;
+  }
+  members.forEach(em=>{
+    const div=document.createElement('div'); div.className='leave-item';
+    const name=document.createElement('span'); name.className='leave-name'; name.textContent=em;
+    const del=document.createElement('button'); del.className='leave-del'; del.textContent='✕ Remove';
+    del.onclick=()=>shareAction('remove',em);
+    div.appendChild(name); div.appendChild(del); box.appendChild(div);
+  });
+}
+
+async function shareAction(action,email){
+  $('share-err').textContent='';
+  try{
+    const res=await api('POST','/api/workspaces/members',{action,email});
+    if(S.workspaces) S.workspaces.own.members=res.members;
+    renderShareList();
+    toast(action==='add' ? '✓ Invited '+email : '✓ Removed '+email);
+  }catch(e){
+    $('share-err').textContent=e.message;
+  }
+}
+
+$('btn-share').onclick=()=>{
+  $('share-err').textContent=''; $('share-email').value='';
+  renderShareList();
+  $('share-modal').style.display='flex';
+};
+$('share-close').onclick=()=>{ $('share-modal').style.display='none'; };
+$('share-add-btn').onclick=async()=>{
+  const em=$('share-email').value.trim().toLowerCase();
+  if(!em || !em.includes('@')){ $('share-err').textContent='Enter a valid email address.'; return; }
+  await shareAction('add',em);
+  $('share-email').value='';
+};
+$('share-email').addEventListener('keydown',e=>{ if(e.key==='Enter') $('share-add-btn').click(); });
 
 function applyData(d){
   S.yr=d.yr||S.yr; S.mo=d.mo||S.mo;
