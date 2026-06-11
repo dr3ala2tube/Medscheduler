@@ -107,6 +107,11 @@ service cloud.firestore {
       // entries naming themselves as actor and may read the history.
       // Nobody — owner included — may edit or delete an entry: history is
       // immutable. No update/delete clause = denied by default.
+      // Retention (cycle 4, D14): entries carry `expire_at` (created + 90d)
+      // and are deleted server-side by the Firestore TTL policy on the
+      // `audit` collection group — TTL bypasses rules, so immutability for
+      // users is unaffected. `expire_at` is OPTIONAL here so entries written
+      // by pre-cycle-4 code remain valid during the deploy window.
       match /audit/{entryId} {
         function canUseAudit() {
           return request.auth != null
@@ -116,11 +121,13 @@ service cloud.firestore {
         }
 
         allow create: if canUseAudit()
-          && request.resource.data.keys().hasOnly(['actor_email', 'created', 'summary', 'changes'])
+          && request.resource.data.keys().hasOnly(['actor_email', 'created', 'summary', 'changes', 'expire_at'])
           && request.resource.data.actor_email == request.auth.token.email
           && request.resource.data.created is string
           && request.resource.data.summary is string
-          && request.resource.data.changes is list;
+          && request.resource.data.changes is list
+          && (!('expire_at' in request.resource.data)
+              || request.resource.data.expire_at is timestamp);
 
         allow get, list: if canUseAudit();
       }

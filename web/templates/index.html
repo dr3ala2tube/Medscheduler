@@ -7,6 +7,7 @@
 <!-- PWA -->
 <link rel="manifest" href="/manifest.json">
 <meta name="theme-color" content="#2563eb">
+<script>(function(){try{var p=localStorage.getItem('ms-theme');var d=p==='dark'||((p==null||p==='auto')&&matchMedia('(prefers-color-scheme: dark)').matches);document.documentElement.setAttribute('data-theme',d?'dark':'light');}catch(e){}})();</script>
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -21,12 +22,24 @@
   --bg:#f0f4f8;--surface:#fff;--border:#e2e8f0;--text:#1a202c;--muted:#718096;
   --primary:#2563eb;--primary-dark:#1d4ed8;--danger:#dc2626;--success:#16a34a;
   --warn:#d97706;--header-h:86px;--sidebar-w:240px;
+  --hl:#eff6ff;--hl-border:#bfdbfe;--danger-soft:#fee2e2;--thead:#f8fafc;
+  --auth-g1:#1e3a5f;--auth-g2:#2563eb;--toast-bg:#1a202c;--toast-fg:#fff;
+}
+/* Dark theme (D16) — chrome only: schedule day cells keep their per-code
+   light colors (data, not theme) with text pinned dark on those cells. */
+html[data-theme="dark"]{
+  --bg:#0f172a;--surface:#1e293b;--border:#334155;--text:#e2e8f0;--muted:#94a3b8;
+  --hl:#1e3a5f;--hl-border:#3b82f6;--danger-soft:rgba(248,113,113,.22);--thead:#243044;
+  --auth-g1:#0b1220;--auth-g2:#1e3a8a;--toast-bg:#e2e8f0;--toast-fg:#0f172a;
+}
+html[data-theme="dark"] input,html[data-theme="dark"] select,html[data-theme="dark"] textarea{
+  background:#0f172a;color:var(--text);border-color:var(--border);
 }
 body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);height:100vh;overflow:hidden;display:flex;flex-direction:column}
 
 /* ── Auth Screen ───────────────────────────────────────────────── */
-#auth-screen{position:fixed;inset:0;background:linear-gradient(135deg,#1e3a5f 0%,#2563eb 100%);display:flex;align-items:center;justify-content:center;z-index:1000}
-.auth-card{background:#fff;border-radius:16px;padding:40px;width:380px;box-shadow:0 20px 60px rgba(0,0,0,0.3)}
+#auth-screen{position:fixed;inset:0;background:linear-gradient(135deg,var(--auth-g1) 0%,var(--auth-g2) 100%);display:flex;align-items:center;justify-content:center;z-index:1000}
+.auth-card{background:var(--surface);border-radius:16px;padding:40px;width:380px;box-shadow:0 20px 60px rgba(0,0,0,0.3)}
 .auth-logo{font-size:2rem;font-weight:800;color:var(--primary);text-align:center;margin-bottom:4px}
 .auth-sub{text-align:center;color:var(--muted);font-size:.9rem;margin-bottom:28px}
 .auth-card label{display:block;font-size:.82rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px;margin-top:16px}
@@ -38,6 +51,8 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(
 .btn-link{background:none;border:none;color:var(--primary);font-size:.87rem;cursor:pointer;margin-top:12px;display:block;text-align:center;text-decoration:underline;width:100%}
 .btn-link:disabled{opacity:.5;cursor:not-allowed}
 .verify-text{font-size:.9rem;text-align:center;line-height:1.5;word-break:break-all}
+.theme-fab{position:absolute;top:14px;right:14px;background:rgba(255,255,255,.18);border:none;color:#fff;font-size:1.05rem;padding:6px 10px;border-radius:8px;cursor:pointer}
+.theme-fab:hover{background:rgba(255,255,255,.3)}
 
 /* ── Main App Layout ───────────────────────────────────────────── */
 #app{display:none;flex-direction:column;height:100vh;overflow:hidden}
@@ -71,14 +86,14 @@ header{background:var(--primary);color:#fff;display:flex;flex-direction:column;f
 #notif-badge{display:none;position:absolute;top:-5px;right:-5px;background:var(--danger);color:#fff;font-size:.64rem;font-weight:700;border-radius:9px;padding:1px 5px;min-width:16px;text-align:center;line-height:1.3}
 .notif-subhead{font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin:14px 0 4px}
 .notif-item{display:flex;align-items:center;gap:8px;padding:8px;border-radius:6px;background:var(--bg);margin-top:6px;font-size:.83rem}
-.notif-item.unread{background:#eff6ff;border-left:3px solid var(--primary)}
+.notif-item.unread{background:var(--hl);border-left:3px solid var(--primary)}
 .notif-time{color:var(--muted);font-size:.72rem;margin-left:auto;white-space:nowrap;flex-shrink:0}
 .notif-empty{color:var(--muted);font-size:.82rem;padding:6px 0}
 .notif-actions{display:flex;gap:6px;margin-left:auto;flex-shrink:0}
 .btn-accept{background:var(--success);color:#fff;border:none;border-radius:6px;padding:5px 12px;font-size:.78rem;font-weight:600;cursor:pointer}
 .btn-accept:hover{filter:brightness(1.08)}
-.btn-decline{background:#fff;color:var(--danger);border:1px solid var(--danger);border-radius:6px;padding:5px 12px;font-size:.78rem;font-weight:600;cursor:pointer}
-.btn-decline:hover{background:#fee2e2}
+.btn-decline{background:var(--surface);color:var(--danger);border:1px solid var(--danger);border-radius:6px;padding:5px 12px;font-size:.78rem;font-weight:600;cursor:pointer}
+.btn-decline:hover{background:var(--danger-soft)}
 #btn-leave-ws{display:none;background:rgba(220,38,38,.5);border:none;color:#fff;padding:4px 10px;border-radius:7px;font-size:.74rem;font-weight:600;cursor:pointer;white-space:nowrap;height:26px}
 #btn-leave-ws:hover{background:rgba(220,38,38,.8)}
 
@@ -103,13 +118,13 @@ aside{width:var(--sidebar-w);background:var(--surface);border-right:1px solid va
 .doc-list{flex:1;overflow-y:auto;padding:6px}
 .doc-item{display:flex;align-items:center;padding:6px 8px;border-radius:6px;cursor:pointer;gap:6px;font-size:.83rem;border:1px solid transparent}
 .doc-item:hover{background:var(--bg)}
-.doc-item.selected{background:#eff6ff;border-color:#bfdbfe}
+.doc-item.selected{background:var(--hl);border-color:var(--hl-border)}
 .doc-item .doc-name{flex:1;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .doc-team{font-size:.7rem;padding:1px 5px;border-radius:10px;font-weight:700;color:#fff}
 .team-T1{background:#3b82f6}.team-T2{background:#10b981}.team-T3{background:#8b5cf6}
 .doc-del{margin-left:auto;color:var(--muted);font-size:.85rem;opacity:0;padding:2px 5px;border-radius:4px;border:none;background:none;cursor:pointer}
 .doc-item:hover .doc-del{opacity:1}
-.doc-del:hover{color:var(--danger);background:#fee2e2}
+.doc-del:hover{color:var(--danger);background:var(--danger-soft)}
 
 /* ── Main content ──────────────────────────────────────────────── */
 main{flex:1;display:flex;flex-direction:column;overflow:hidden}
@@ -123,7 +138,7 @@ main{flex:1;display:flex;flex-direction:column;overflow:hidden}
 .grid-wrap{flex:1;overflow:auto;position:relative}
 table.schedule{border-collapse:collapse;table-layout:fixed;min-width:100%}
 table.schedule th,table.schedule td{border:1px solid #e5e7eb;text-align:center;font-size:.78rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-table.schedule th{background:#f8fafc;font-weight:700;position:sticky;top:0;z-index:10;padding:4px 2px;font-size:.73rem}
+table.schedule th{background:#f8fafc;color:#1a202c;font-weight:700;position:sticky;top:0;z-index:10;padding:4px 2px;font-size:.73rem}
 table.schedule th.sticky-col{left:0;z-index:20;min-width:160px;max-width:160px;text-align:left;padding-left:8px}
 table.schedule th.col-team{min-width:38px;max-width:38px}
 table.schedule th.col-hrs{min-width:42px;max-width:42px}
@@ -131,7 +146,7 @@ table.schedule th.col-day{min-width:42px;max-width:42px}
 table.schedule td.sticky-col{position:sticky;left:0;background:var(--surface);font-weight:600;text-align:left;padding:4px 8px;z-index:5;font-size:.8rem}
 table.schedule td.col-team{font-size:.7rem;font-weight:700}
 table.schedule td.col-hrs{color:var(--muted);font-size:.76rem}
-table.schedule td.day-cell{cursor:pointer;height:30px;font-size:.76rem;font-weight:600;transition:opacity .1s}
+table.schedule td.day-cell{color:#1a202c;cursor:pointer;height:30px;font-size:.76rem;font-weight:600;transition:opacity .1s}
 table.schedule td.day-cell:hover{opacity:.75;outline:2px solid var(--primary);outline-offset:-2px}
 table.schedule td.day-cell.cell-conflict{outline:2px dashed var(--danger);outline-offset:-2px}
 #conflict-chip{display:none;background:var(--danger);border-color:var(--danger);color:#fff}
@@ -143,16 +158,16 @@ table.schedule tr:hover td:not(.sticky-col){filter:brightness(.95)}
 /* ── Summary Table ─────────────────────────────────────────────── */
 .summary-wrap{padding:20px;overflow:auto}
 table.summary{border-collapse:collapse;width:100%;font-size:.83rem}
-table.summary th{background:#f8fafc;border:1px solid var(--border);padding:8px 10px;font-weight:700;text-align:center;position:sticky;top:0}
+table.summary th{background:var(--thead);border:1px solid var(--border);padding:8px 10px;font-weight:700;text-align:center;position:sticky;top:0}
 table.summary th:first-child{text-align:left}
 table.summary td{border:1px solid var(--border);padding:6px 10px;text-align:center}
 table.summary td:first-child{font-weight:600;text-align:left}
-table.summary tr:nth-child(even){background:#f8fafc}
+table.summary tr:nth-child(even){background:var(--thead)}
 table.summary .high{color:var(--danger);font-weight:700}
 
 /* ── Modals ────────────────────────────────────────────────────── */
 .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:500;padding:16px}
-.modal{background:#fff;border-radius:12px;padding:24px;width:100%;max-width:440px;box-shadow:0 20px 60px rgba(0,0,0,.25);max-height:90vh;overflow-y:auto}
+.modal{background:var(--surface);border-radius:12px;padding:24px;width:100%;max-width:440px;box-shadow:0 20px 60px rgba(0,0,0,.25);max-height:90vh;overflow-y:auto}
 .modal h2{font-size:1rem;font-weight:700;margin-bottom:16px;display:flex;align-items:center;gap:8px}
 .modal label{display:block;font-size:.8rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin:12px 0 4px}
 .modal input,.modal select{width:100%;padding:8px 12px;border:1.5px solid var(--border);border-radius:7px;font-size:.9rem;outline:none}
@@ -170,7 +185,7 @@ table.summary .high{color:var(--danger);font-weight:700}
 .leave-del:hover{color:var(--danger)}
 
 /* Toast */
-.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#1a202c;color:#fff;padding:10px 20px;border-radius:8px;font-size:.87rem;z-index:9999;opacity:0;transition:opacity .3s;pointer-events:none}
+.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--toast-bg);color:var(--toast-fg);padding:10px 20px;border-radius:8px;font-size:.87rem;z-index:9999;opacity:0;transition:opacity .3s;pointer-events:none}
 .toast.show{opacity:1}
 
 /* Rules modal */
@@ -207,12 +222,12 @@ table.summary .high{color:var(--danger);font-weight:700}
 .shift-row-code{font-weight:700;font-size:.82rem;color:var(--text);padding:4px 7px;background:var(--bg);border-radius:5px;text-align:center}
 .shift-color-swatch{width:24px;height:24px;border-radius:4px;border:2px solid var(--border);cursor:pointer;flex-shrink:0;position:relative}
 .shift-color-swatch:hover{border-color:var(--primary)}
-.color-picker-popup{display:none;position:absolute;top:28px;left:0;background:#fff;border:1px solid var(--border);border-radius:8px;padding:8px;box-shadow:0 4px 16px rgba(0,0,0,.15);z-index:600;width:180px}
+.color-picker-popup{display:none;position:absolute;top:28px;left:0;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:8px;box-shadow:0 4px 16px rgba(0,0,0,.15);z-index:600;width:180px}
 .color-picker-popup.open{display:grid;grid-template-columns:repeat(6,1fr);gap:5px}
 .color-swatch-opt{width:22px;height:22px;border-radius:4px;cursor:pointer;border:2px solid transparent}
 .color-swatch-opt:hover{border-color:var(--primary);transform:scale(1.1)}
 .shift-del-btn{background:none;border:none;color:var(--muted);cursor:pointer;font-size:.9rem;padding:2px 4px;border-radius:4px}
-.shift-del-btn:hover{color:var(--danger);background:#fee2e2}
+.shift-del-btn:hover{color:var(--danger);background:var(--danger-soft)}
 .clinic-enabled-chk{width:16px;height:16px;cursor:pointer;accent-color:var(--primary);justify-self:center}
 .shifts-add-form{background:var(--bg);border-radius:8px;padding:10px;margin-top:6px}
 .shifts-add-form h4{font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-bottom:8px}
@@ -240,7 +255,7 @@ table.summary .high{color:var(--danger);font-weight:700}
 .sidebar-mobile-hdr{display:none;align-items:center;justify-content:space-between;padding:10px 12px 8px;border-bottom:1px solid var(--border);background:var(--surface);flex-shrink:0}
 .sidebar-mobile-hdr span{font-weight:700;font-size:.88rem;color:var(--primary)}
 #btn-close-sidebar{background:none;border:none;color:var(--muted);font-size:1rem;cursor:pointer;padding:3px 7px;border-radius:5px}
-#btn-close-sidebar:hover{color:var(--danger);background:#fee2e2}
+#btn-close-sidebar:hover{color:var(--danger);background:var(--danger-soft)}
 
 /* ── Tablet (≤900px) ─────────────────────────────────────────────── */
 @media(max-width:900px){
@@ -313,6 +328,7 @@ table.summary .high{color:var(--danger);font-weight:700}
 
 <!-- ── Auth Screen ─────────────────────────────────────────────── -->
 <div id="auth-screen">
+  <button id="btn-theme-auth" class="theme-fab" title="Theme">🌓</button>
   <div class="auth-card" id="login-card">
     <div class="auth-logo">🩺 MedScheduler</div>
     <div class="auth-sub">Team Schedule Management</div>
@@ -356,6 +372,7 @@ table.summary .high{color:var(--danger);font-weight:700}
       <span id="ws-badge"></span>
       <button id="btn-leave-ws" title="Leave this shared workspace">🚪 Leave</button>
       <div class="user-badge">
+        <button id="btn-theme" title="Theme">🌓</button>
         <button id="btn-history" title="Schedule history — who changed what, when">📜</button>
         <button id="btn-notif" title="Notifications">🔔<span id="notif-badge"></span></button>
         <span id="user-email-lbl"></span>
@@ -874,37 +891,69 @@ const ak = (pid,d)=> `${pid}|${S.yr}|${S.mo}|${d}`;
 const getAsgn = (pid,d)=> S.asgn[ak(pid,d)] || '_';
 const setAsgn = (pid,d,v)=>{ S.asgn[ak(pid,d)]=v; };
 
-// ── Conflict detection (D11): duplicate single-slot shifts ─────────
-// Single-slot codes = duty types + enabled clinics (the scheduler fills
-// exactly one physician per such code per day). Conflicts are DERIVED
-// data: recomputed from S.asgn, never persisted.
+// ── Conflict detection (D11/D15): duplicate single-slot shifts, working
+// during leave, missing post-call rest. Conflicts are DERIVED data:
+// recomputed from S.asgn/S.leaves, never persisted; warn + override only.
+// Non-working codes mirror scheduler OFF_SET, plus '_' = empty cell.
+const NONWORK_CODES = new Set(['_','O','PC','L','R']);
+const isWorkingCode = code => !NONWORK_CODES.has(code || '_');
 function singleSlotCodes(){
   return new Set([...((S.C&&S.C.duty_set)||[]), ...((S.C&&S.C.clinic_set)||[])]);
 }
+function postCallDays(){
+  const v = S.rules && S.rules.post_call_days;
+  const n = parseInt(v != null ? v : DEFAULT_RULES.post_call_days, 10);
+  return isNaN(n) || n < 0 ? 0 : n;
+}
+function monthDateStr(d){ return `${S.yr}-${p2(S.mo+1)}-${p2(d)}`; }
+function onLeave(pid,d){
+  const ds = monthDateStr(d);
+  return S.leaves.some(b => +b.pid === pid && b.f <= ds && ds <= b.t);
+}
 function computeConflicts(){
   const single=singleSlotCodes();
+  const duty=new Set((S.C&&S.C.duty_set)||[]);
+  const pc=postCallDays();
   const td=dim(S.yr,S.mo);
   const byDayCode={};                   // day -> code -> [pid,...]
+  const list=[];                        // [{type,day,code,pids,...}]
+  const cells=new Set();                // "pid|day" of involved cells
   S.docs.forEach(ph=>{
     for(let d=1;d<=td;d++){
       const code=getAsgn(ph.id,d);
-      if(!single.has(code)) continue;
-      if(!byDayCode[d]) byDayCode[d]={};
-      if(!byDayCode[d][code]) byDayCode[d][code]=[];
-      byDayCode[d][code].push(ph.id);
+      if(single.has(code)){
+        if(!byDayCode[d]) byDayCode[d]={};
+        if(!byDayCode[d][code]) byDayCode[d][code]=[];
+        byDayCode[d][code].push(ph.id);
+      }
+      if(!isWorkingCode(code)) continue;
+      if(onLeave(ph.id,d)){              // working during leave (D15)
+        list.push({type:'leave',day:d,code,pids:[ph.id]});
+        cells.add(ph.id+'|'+d);
+      }
+      if(duty.has(code)){                // post-call rest window (D15)
+        for(let k=1;k<=pc;k++){
+          const nd=d+k; if(nd>td) break; // window truncates at month end
+          const nc=getAsgn(ph.id,nd);
+          if(isWorkingCode(nc)){
+            list.push({type:'rest',day:nd,code:nc,pids:[ph.id],dutyDay:d,dutyCode:code});
+            cells.add(ph.id+'|'+d); cells.add(ph.id+'|'+nd);
+          }
+        }
+      }
     }
   });
-  const list=[];                        // [{day, code, pids}]
-  const cells=new Set();                // "pid|day" of involved cells
-  Object.keys(byDayCode).map(Number).sort((a,b)=>a-b).forEach(d=>{
-    Object.keys(byDayCode[d]).sort().forEach(code=>{
+  Object.keys(byDayCode).map(Number).forEach(d=>{
+    Object.keys(byDayCode[d]).forEach(code=>{
       const pids=byDayCode[d][code];
       if(pids.length>1){
-        list.push({day:d,code,pids});
+        list.push({type:'slot',day:d,code,pids});
         pids.forEach(pid=>cells.add(pid+'|'+d));
       }
     });
   });
+  const rank={slot:0,leave:1,rest:2};
+  list.sort((a,b)=>a.day-b.day || rank[a.type]-rank[b.type] || (a.code<b.code?-1:a.code>b.code?1:0));
   return {list,cells};
 }
 function conflictCreatedBy(pid,day,code){
@@ -912,6 +961,32 @@ function conflictCreatedBy(pid,day,code){
   if(!singleSlotCodes().has(code)) return null;
   const others=S.docs.filter(p=>p.id!==pid && getAsgn(p.id,day)===code);
   return others.length?others:null;
+}
+function cellConflictWarnings(pid,day,code){
+  // Warnings (all conflict types) if `code` were placed at (pid, day).
+  const msgs=[];
+  const others=conflictCreatedBy(pid,day,code);
+  if(others){
+    msgs.push(((S.C.shifts[code]||{}).label||code)+' on day '+day+' is already assigned to '+others.map(p=>p.name).join(', '));
+  }
+  if(isWorkingCode(code)){
+    if(onLeave(pid,day)) msgs.push('day '+day+' falls within an approved leave');
+    const duty=new Set((S.C&&S.C.duty_set)||[]);
+    const pc=postCallDays(); const td=dim(S.yr,S.mo);
+    for(let k=1;k<=pc;k++){
+      const pd=day-k; if(pd<1) break;
+      const c0=getAsgn(pid,pd);
+      if(duty.has(c0)){ msgs.push('day '+day+' is post-call rest after the '+c0+' duty on day '+pd); break; }
+    }
+    if(duty.has(code)){
+      for(let k=1;k<=pc;k++){
+        const nd=day+k; if(nd>td) break;
+        const nc=getAsgn(pid,nd);
+        if(isWorkingCode(nc)){ msgs.push('post-call rest after this duty is blocked by '+nc+' on day '+nd); break; }
+      }
+    }
+  }
+  return msgs;
 }
 function updateConflictChip(res){
   const chip=$('conflict-chip'); if(!chip) return;
@@ -1596,11 +1671,10 @@ function openCellEdit(e){
 $('cell-ok').onclick=()=>{
   const {pid,day}=S.editing;
   const code=$('cell-code').value;
-  const others=conflictCreatedBy(pid,day,code);
-  if(others && !S.editing.conflictWarned){
+  const warns=cellConflictWarnings(pid,day,code);
+  if(warns.length && !S.editing.conflictWarned){
     S.editing.conflictWarned=true;
-    const names=others.map(p=>p.name).join(', ');
-    $('cell-err').textContent='⚠ '+((S.C.shifts[code]||{}).label||code)+' on day '+day+' is already assigned to '+names+'. Click Apply again to keep both.';
+    $('cell-err').textContent='⚠ '+warns.join(' · ')+'. Click Apply again to override.';
     return;
   }
   if(getAsgn(pid,day)!==code) pushUndoState();
@@ -1716,11 +1790,11 @@ $('manual-add-btn').onclick=()=>{
   if(!pid||!code||day<1||day>td){ $('manual-err').textContent='Invalid input.'; return; }
   const existing=getAsgn(pid,day);
   if(existing!=='_'&&existing!=='O'){ $('manual-err').textContent=`Day ${day} already assigned: ${existing}`; return; }
-  const others=conflictCreatedBy(pid,day,code);
+  const warns=cellConflictWarnings(pid,day,code);
   const wk=pid+'|'+day+'|'+code;
-  if(others && manualWarnKey!==wk){
+  if(warns.length && manualWarnKey!==wk){
     manualWarnKey=wk;
-    $('manual-err').textContent='⚠ '+code+' on day '+day+' is already assigned to '+others.map(p=>p.name).join(', ')+'. Click again to keep both.';
+    $('manual-err').textContent='⚠ '+warns.join(' · ')+'. Click again to override.';
     return;
   }
   manualWarnKey=null;
@@ -2253,7 +2327,15 @@ $('conflict-chip').onclick=()=>{
     const names=c.pids.map(pid=>{const p=S.docs.find(x=>x.id===pid); return p?p.name:('#'+pid);}).join(', ');
     const row=document.createElement('div');
     row.style.cssText='padding:6px 9px;border:1px solid var(--border);border-left:3px solid var(--danger);border-radius:6px;margin-bottom:6px;font-size:.85rem';
-    row.textContent='Day '+c.day+' ('+DN[dow(S.yr,S.mo,c.day)]+') — '+c.code+' ('+((S.C.shifts[c.code]||{}).label||c.code)+'): '+names;
+    const when='Day '+c.day+' ('+DN[dow(S.yr,S.mo,c.day)]+') — ';
+    const lbl=(S.C.shifts[c.code]||{}).label||c.code;
+    if(c.type==='leave'){
+      row.textContent=when+'On leave: '+names+' assigned '+c.code+' ('+lbl+')';
+    } else if(c.type==='rest'){
+      row.textContent=when+'Missing post-call rest: '+names+' assigned '+c.code+' within the '+postCallDays()+'-day rest after the '+c.dutyCode+' duty on day '+c.dutyDay;
+    } else {
+      row.textContent=when+'Duplicate '+c.code+' ('+lbl+'): '+names;
+    }
     div.appendChild(row);
   });
   $('conflict-modal').style.display='flex';
@@ -2362,6 +2444,35 @@ updateUndoRedoButtons();
 })();
 
 // ── Service Worker registration ───────────────────────────────────
+// ── Theme (D16): auto → light → dark, persisted per device ────────
+const THEME_ORDER=['auto','light','dark'];
+const THEME_ICON={auto:'🌓',light:'☀️',dark:'🌙'};
+function themePref(){
+  let v=null; try{ v=localStorage.getItem('ms-theme'); }catch(e){}
+  return THEME_ORDER.includes(v)?v:'auto';
+}
+function applyTheme(){
+  const pref=themePref();
+  const dark=pref==='dark'||(pref==='auto'&&window.matchMedia('(prefers-color-scheme: dark)').matches);
+  document.documentElement.setAttribute('data-theme',dark?'dark':'light');
+  const meta=document.querySelector('meta[name="theme-color"]');
+  if(meta) meta.content=dark?'#0f172a':'#2563eb';
+  const label='Theme: '+pref[0].toUpperCase()+pref.slice(1)+' — click to change';
+  ['btn-theme','btn-theme-auth'].forEach(id=>{
+    const b=$(id); if(!b) return;
+    b.textContent=THEME_ICON[pref]; b.title=label;
+  });
+}
+function cycleTheme(){
+  const next=THEME_ORDER[(THEME_ORDER.indexOf(themePref())+1)%THEME_ORDER.length];
+  try{ localStorage.setItem('ms-theme',next); }catch(e){}
+  applyTheme();
+}
+$('btn-theme').onclick=cycleTheme;
+$('btn-theme-auth').onclick=cycleTheme;
+window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change',()=>{ if(themePref()==='auto') applyTheme(); });
+applyTheme();
+
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/sw.js')
