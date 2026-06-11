@@ -85,7 +85,13 @@ This lets any signed-in team member read/write the shared schedule.
 > `web/firestore.rules` (workspaces + invites + notifications + audit) — paste
 > THAT file when publishing.
 
-### Audit-log retention — Firestore TTL (required once, cycle 4 / D14)
+### Audit-log retention — Firestore TTL (cycle 4 / D14 — ACTIVATION DEFERRED 2026-06-11)
+
+> Status: NOT enabled (user decision — history kept indefinitely for now).
+> The app already writes `expire_at` on every audit entry, so enabling the
+> policy below at any future date turns on 90-day retention with no code
+> change. ⚠ Activating later purges retroactively: every entry already older
+> than 90 days is deleted within ~24 h of activation.
 
 Audit entries (`workspaces/{wsId}/audit/{entryId}`) carry an `expire_at`
 timestamp set 90 days after creation (`AUDIT_RETENTION_DAYS` in `app.py`).
