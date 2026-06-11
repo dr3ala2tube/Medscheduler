@@ -1,4 +1,4 @@
-# MedScheduler — Project State (Last updated: June 2026)
+# MedScheduler — Project State (Last updated: June 11, 2026)
 
 This file is the single source of truth for resuming work on MedScheduler.
 Read this at the start of every new session instead of reconstructing from history.
@@ -48,7 +48,8 @@ Data model (since June 2026, "private workspaces" feature):
 |---|---|---|
 | `workspaces/{uid}` | Workspace meta/ACL: `owner_uid`, `owner_email`, `members` (lowercase emails) | Owner full; members read; only owner edits membership |
 | `workspaces/{uid}/data/schedule` | Schedule payload (same shape as old shared doc) | Owner + invited members, full read/write |
-| `shared/schedule` | LEGACY old team-wide doc, kept as read-only backup | Any authenticated user, read-only |
+| `workspaces/{uid}/audit/{entryId}` | Immutable audit trail — one entry per web save: actor email, ISO timestamp, summary, change lines | Owner + members create (own actor_email only) and read; NOBODY can update/delete |
+| `shared/schedule` | LEGACY old team-wide doc, kept as inert backup | Unreachable (no rules block grants access since cycle 2) |
 
 **Sharing model:** every account gets a private workspace (auto-created on first
 login). The owner invites colleagues by email via the 👥 Share button; invited
@@ -201,6 +202,9 @@ Since June 2026, signing in no longer grants access to any shared data:
   verified by direct REST probe returning 403 for revoked/uninvited users
 - Self-signup is still open, but a new account sees nothing until invited
 - Optional hardening (unchanged): email allowlist check after sign-in
+- (Cycle 3, 2026-06-11) **Audit trail**: every web save writes who/when/what (server-side diff) to `workspaces/{ws}/audit`; 📜 History button (next to the 🔔 bell) shows it to owner and members; entries are immutable for everyone
+- (Cycle 3) **Conflict detection**: duplicate single-slot assignments (duty DM/DF or clinic on the same day) warn at edit time, highlight red, and show a ⚠ chip — never block saving (override allowed)
+- (Cycle 3) **Password reset**: "Forgot password?" on the sign-in card (enumeration-safe — same message whether or not the account exists)
 
 ---
 
@@ -224,6 +228,7 @@ Since June 2026, signing in no longer grants access to any shared data:
 - [x] **Desktop app workspace migration** — completed 2026-06-10: `firebase_service.py` now supports `get_workspaces()`, parameterized `save_app_data(workspace_id)` / `load_app_data(workspace_id)` targeting `workspaces/{id}/data/schedule`; `medscheduler_refactored.py` UI updated with workspace selector dropdown and selection dialog after login
 - [x] **Cycle 2 shipped 2026-06-10** — first-login import popup removed; email verification for new signups (cutoff 2026-06-10 UTC, constant in app.py + index.html); invitation accept/decline/leave + notifications panel; UI fixes (#undefined cell color, dynamic max-hours highlight, header clipping, mobile touch targets). Rules v2 published (Console rules history = rollback)
 - [x] **Remove legacy rules block** — done in cycle 2; `shared/schedule` doc remains in Firestore as an inert backup
+- [x] **Cycle 3 shipped 2026-06-11** — conflict detection (warn + override, derived client-side, nothing persisted); immutable audit trail + History UI (`/api/audit`, rules v3 published); 📜 moved to header row 1 + action-row compaction (desktop overflow fix); password reset on sign-in card. Branch `feature/conflicts-audit`, merged via PR; details in PROJECT_MAP.md cycle 3
 - [ ] **Add email allowlist** (optional) — check `user.email` after sign-in against a hardcoded list
 - [ ] **Always-on Render** — upgrade to $7/month plan if the 30-second cold-start is annoying
 - [ ] **Custom domain** (optional) — Render supports free custom domains

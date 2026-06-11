@@ -1,6 +1,6 @@
 # PROJECT_MAP.md
 
-Last updated: 2026-06-11 — M1–M4 complete and live (web merged to `main`, deployed on Render `medscheduler-5io6.onrender.com`; desktop updated with workspace support). **FEATURE CYCLE 2 COMPLETE AND LIVE (M5–M10, deployed 2026-06-10):** legacy-import prompt removed, email verification for new signups, invitation accept/decline/leave with per-user notifications panel, UI alignment fixes. Rules v2 (invites + notifications) published in Firebase Console. **FEATURE CYCLE 3 PLANNED 2026-06-11 (M11–M14, branch `feature/conflicts-audit`): conflict detection + audit trail — awaiting approval.**
+Last updated: 2026-06-11 — M1–M4 complete and live (web merged to `main`, deployed on Render `medscheduler-5io6.onrender.com`; desktop updated with workspace support). **FEATURE CYCLE 2 COMPLETE AND LIVE (M5–M10, deployed 2026-06-10):** legacy-import prompt removed, email verification for new signups, invitation accept/decline/leave with per-user notifications panel, UI alignment fixes. Rules v2 (invites + notifications) published in Firebase Console. **FEATURE CYCLE 3 COMPLETE AND LIVE (M11–M15, deployed 2026-06-11):** conflict detection (duplicate duty/clinic slots, warn + override, red highlights + ⚠ chip), immutable audit trail (`workspaces/{wsId}/audit/{entryId}`) with 📜 History modal, header-row compaction, password reset on sign-in card. Rules v3 (audit block) published in Firebase Console.
 
 ## [TECH_STACK]
 
@@ -32,6 +32,9 @@ workspaces/{ownerUid}                      ← workspace meta/ACL doc
 
 workspaces/{ownerUid}/data/schedule       ← schedule payload
 
+workspaces/{ownerUid}/audit/{entryId}      ← immutable audit entry per web save (cycle 3):
+  actor_email, created (ISO 8601), summary, changes (array<string>, capped 300+1)
+
 shared/schedule                            ← legacy doc; kept in Firestore as untouched backup,
                                              unreachable after M5 rules (no block grants access)
 ```
@@ -49,7 +52,7 @@ notifications/{recipientUid}/items/{autoId}
 ```
 
 ### Firestore security rules
-`web/firestore.rules` is the deployed text (published to Firebase Console at M10, 2026-06-10): invitee get/list via `invites`, diff-validated self-service accept/decline/leave transitions, owner identity fields frozen, `notifications/{uid}/items` block per D9, legacy `shared/schedule` block removed.
+`web/firestore.rules` is the deployed text (published at M10 2026-06-10; audit block added and re-published at M14 2026-06-11): invitee get/list via `invites`, diff-validated self-service accept/decline/leave transitions, owner identity fields frozen, `notifications/{uid}/items` block per D9, `workspaces/{wsId}/audit/{entryId}` block per D13 (owner/member create-with-own-actor_email + read; NO update/delete), legacy `shared/schedule` block removed.
 
 ### Backend (web/app.py) — routes
 | Route | Method | Status |
@@ -58,6 +61,7 @@ notifications/{recipientUid}/items/{autoId}
 | `/api/workspaces/members` | POST | owner adds/removes a member email |
 | `/api/data` | GET/POST | `?ws={wsId}` (default: caller's uid) → `workspaces/{ws}/data/schedule` |
 | `/api/data/import-legacy` | POST | **REMOVED in M5** (was one-time legacy migration) |
+| `/api/audit` | GET | (cycle 3) workspace audit trail, newest-first 50; access enforced by rules |
 | `/api/schedule`, `/api/summary`, `/api/export/*` | POST | stateless — operate on posted payload |
 
 Implemented in M7: `POST /api/invitations/respond` (accept/decline, notifies owner), `POST /api/workspaces/leave` (notifies owner), `GET /api/notifications` (newest-first, unread count), `POST /api/notifications/read` (ids, best-effort); `GET /api/workspaces` now returns `own.invites` + pending `invites` list; `POST /api/workspaces/members` add→`invites`, remove→both arrays. New helpers: `fs_create`, `fs_patch_fields` (updateMask + exists precondition), `fs_query_notifications`, `_notify` (best-effort, never rolls back the membership change).
@@ -71,6 +75,7 @@ All Firestore calls keep the existing pattern: user's ID token, urllib REST, `_p
 - Email-verification gate: `login-card`/`verify-card` on auth screen (M6)
 - Legacy-import prompt and `maybeOfferLegacyImport()` REMOVED in M5 — empty workspace just starts fresh
 - `loadData()/btn-save/btn-load` pass `?ws=${S.wsId}`
+- (Cycle 3) `computeConflicts()`/`conflictCreatedBy()` engine + `.cell-conflict` highlights + ⚠ chip & conflicts modal; warn-once-then-apply in cell editor and Manual Assign; save toast reports conflict count and failed audit writes; 📜 History button (header row 1, icon-only next to 🔔) → history modal via `GET /api/audit`; "Forgot password?" on sign-in card via `sendPasswordResetEmail` (enumeration-safe messaging); header row 2 compacted (gap/padding/sep/font) to fit desktop widths
 
 ### Desktop app (medscheduler_refactored.py / firebase_service.py)
 - **Updated June 2026** to support workspace model. `firebase_service.py` exports `get_workspaces()` and accepts `workspace_id` in `save_app_data()`/`load_app_data()`. `medscheduler_refactored.py` shows workspace selector dropdown in toolbar and workspace selection dialog after login.
@@ -161,15 +166,16 @@ Pre-flight: working tree on `main` has UNCOMMITTED desktop workspace changes (`f
   - Pass (V2): node --check, element-id checks, Flask render test
   - VERIFIED 2026-06-11: node --check OK; 7/7 relTime tests (just-now/min/h/d buckets, locale fallback, garbage + null passthrough); render 200 with all 9 new ids/hooks. Implementation notes: 📜 History button sits next to 👥 Share in header row 2 and works for owner AND members (D13) on whichever workspace is active (`wsQuery()`); entries render as native <details> accordions (actor · relative time with full ISO tooltip · summary; change lines inside, all via textContent — no innerHTML injection of stored values); save toast appends "history entry could not be recorded" when the save response carries `audited:false`
   - M14 live-matrix finding (user, 2026-06-11): with History in header row 2 the action row overflowed even at full desktop width → 📜 History moved to header row 1 (icon-only, next to 🔔 bell, same pattern; tooltip carries the label). Row 2 restored to pre-cycle width; `btn-history` id and handler unchanged
-- **M14 — V3 verification + deploy + docs — IN PROGRESS 2026-06-11 (pre-deploy regression GREEN; awaiting rules publish + PR merge + live matrix)**
+- **M14 — V3 verification + deploy + docs — DONE 2026-06-11 (V3: live operational verification, user-confirmed)**
   - Deploy order: publish rules FIRST (safe both ways here: old code never touches `audit`; new code + old rules only degrades to `audited:false` because audit writes are best-effort — but rules-first stays the standard)
   - Live matrix: two accounts — member edits & saves shared ws → owner sees audit entry with member's email + correct diff; owner edit → member sees entry; assign DM to two physicians same day → warn at edit, red highlight both cells, save toast shows count, second account sees highlights after load; non-member cannot read audit (direct REST probe); history modal at 360/640/900px
   - Update PROJECT_MAP.md (mark milestones done, move [A]→[V]) + PROJECT_STATE.md; commit messages per milestone; merge via PR after approval
   - PRE-DEPLOY REGRESSION 2026-06-11 on branch head 56c49d4: 28/28 audit backend + 14/14 conflict logic + 7/7 relTime; node --check; py_compile (app, scheduler); render 200 with all cycle-3 ids; /api/data + /api/audit 401 unauthenticated; 20 routes; working-tree blobs == HEAD for all 4 touched files (truncation check). GitHub unreachable from sandbox — push/PR/publish/live-matrix are user-side steps; PROJECT_STATE.md update deferred until live matrix passes (cycle-2 pattern)
+  - LIVE 2026-06-11 (user-confirmed): Rules Playground dry-run passed; rules published BEFORE merge; live matrix passed — owner & member audit entries with correct diffs, no-change save writes nothing, duplicate-DM warn/override/highlight/chip/toast flow works on both accounts. Findings fixed during matrix: 📜 History moved to header row 1 (dabba18) and action row compacted (be4cf14) after the row overflowed at desktop width; M15 password reset (d98e14d) shipped in the same merge
 
 **Assumptions (cycle 3):**
 - [V] Duty and clinic codes are single-slot (one physician/day) — verified in scheduler.py auto-schedule phases 4/4.5/5.
-- [A] One audit entry per Save click is the right granularity (saves are whole-blob; per-keystroke history not possible without schema redesign).
+- [V] One audit entry per Save click — confirmed live 2026-06-11; entries readable and correctly attributed in the two-account matrix.
 - [A] Audit volume is low (small team, manual saves) → 1 extra read + 1 write per save and no retention policy are acceptable.
 - [A] Desktop-originated saves appearing in history is NOT expected by users this cycle (web-only decision); gap documented in [ORPHANS] and History modal is web-data only.
 
