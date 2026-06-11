@@ -180,6 +180,12 @@ Pre-flight: working tree on `main` has UNCOMMITTED desktop workspace changes (`f
 
 **Rollback (cycle 3):** restore previous rules from Firebase Console history; revert branch/PR (Render redeploys old code); audit sub-collection is additive — old code never reads it; conflicts are client-derived and leave no data behind; no schema or legacy-doc changes anywhere.
 
+- **M15 — Password reset (user-requested 2026-06-11) — IMPLEMENTED 2026-06-11** (L1: index.html only; auth flow addition, same branch)
+  - "Forgot password?" `.btn-link` on the sign-in card → `auth.sendPasswordResetEmail(email from #auth-email)`; reset emails are standard Firebase Auth action links (NOT Dynamic Links — unaffected by the FDL shutdown, verified against the FDL deprecation FAQ)
+  - Privacy: `auth/user-not-found` shows the SAME generic "if an account exists…" message as success (no email enumeration); other errors via existing `friendlyAuthError()`; success message green, color reset on next auth attempt
+  - No backend/rules change; desktop unaffected (a reset changes the Firebase password globally, so desktop logins use the new password)
+  - VERIFIED: node --check; render 200 with `btn-forgot` + handler. Live email delivery check = user-side (M14/M15 matrix)
+
 ## [ORPHANS]
 
 - Firebase web API key hardcoded in `app.py`/`index.html` and also expected as env var per DEPLOY.md — harmless (web API keys are public identifiers) but inconsistent; consider consolidating to env vars later.
