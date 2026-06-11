@@ -1829,12 +1829,13 @@ async function renderSummary(){
   if(!S.docs.length) return;
   try {
     const res=await api('POST','/api/summary',{docs:S.docs,asgn:S.asgn,yr:S.yr,mo:S.mo,rules:S.rules,shiftConfig:S.shiftConfig});
-    const cols=['name','team','total','calls','daycare','postcall','off','leave','weekend_off'];
-    const labels=['Physician','Team','Total Hrs','On-Calls','Daycare','Post-Call','Off','Leave','Weekend Off'];
+    const cols=['name','morning','total','calls','daycare','postcall','off','leave','weekend_off','total_off'];
+    const labels=['Physician','Morning Days','Total Hrs','On-Calls','Daycare','Post-Call','Random Off','Leave','Weekends Inc in Offs','Total Off Days'];
     const thead=$('summary-head'), tbody=$('summary-body');  // summary-head IS the <tr> inside <thead>
     thead.innerHTML=''; tbody.innerHTML='';
     labels.forEach(l=>{ const th=document.createElement('th');th.textContent=l;thead.appendChild(th); });
     res.rows.forEach(row=>{
+      row.total_off=(row.postcall||0)+(row.off||0)+(row.leave||0);  // OFF_SET days (PC+O+R+L)
       const tr=document.createElement('tr');
       cols.forEach(c=>{
         const td=document.createElement('td');
