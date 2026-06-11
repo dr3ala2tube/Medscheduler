@@ -323,6 +323,7 @@ table.summary .high{color:var(--danger);font-weight:700}
     <div class="auth-err" id="auth-err"></div>
     <button class="btn-primary" id="btn-signin">Sign In</button>
     <button class="btn-link" id="btn-create">Create account instead</button>
+    <button class="btn-link" id="btn-forgot" style="margin-top:4px">Forgot password?</button>
   </div>
   <div class="auth-card" id="verify-card" style="display:none">
     <div class="auth-logo">🩺 MedScheduler</div>
@@ -950,11 +951,33 @@ async function api(method, path, body){
 $('btn-signin').onclick = () => doAuth(false);
 $('btn-create').onclick = () => doAuth(true);
 $('auth-email').addEventListener('keydown', e=>{ if(e.key==='Enter') doAuth(false); });
+$('btn-forgot').onclick = async()=>{
+  const email=$('auth-email').value.trim();
+  const err=$('auth-err');
+  if(!email){ err.style.color=''; err.textContent='Enter your email address above first.'; return; }
+  $('btn-forgot').disabled=true;
+  try {
+    await auth.sendPasswordResetEmail(email);
+    err.style.color='var(--ok, #16a34a)';
+    err.textContent='If an account exists for '+email+', a password-reset email is on its way. Check your inbox (and spam).';
+  } catch(e){
+    if(e.code==='auth/user-not-found'){
+      // Same message as success: don't reveal which emails have accounts
+      err.style.color='var(--ok, #16a34a)';
+      err.textContent='If an account exists for '+email+', a password-reset email is on its way. Check your inbox (and spam).';
+    } else {
+      err.style.color='';
+      err.textContent=friendlyAuthError(e.code);
+    }
+  } finally {
+    $('btn-forgot').disabled=false;
+  }
+};
 $('auth-pw').addEventListener('keydown',    e=>{ if(e.key==='Enter') doAuth(false); });
 
 async function doAuth(isCreate){
   const email=$('auth-email').value.trim(), pw=$('auth-pw').value;
-  $('auth-err').textContent='';
+  $('auth-err').textContent=''; $('auth-err').style.color='';
   if(!email||!pw){ $('auth-err').textContent='Please fill in both fields.'; return; }
   $('btn-signin').disabled=true; $('btn-signin').innerHTML='<span class="spinner"></span>Connecting…';
   try {
