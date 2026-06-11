@@ -15,7 +15,7 @@ import os
 import urllib.request
 import urllib.parse
 import urllib.error
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from functools import wraps
 from typing import Any, Dict, List, Optional
 
@@ -43,6 +43,12 @@ FIRESTORE_BASE    = (f"https://firestore.googleapis.com/v1/projects/{PROJECT_ID}
 # have a verified email; accounts created before it are grandfathered.
 # MUST match VERIFICATION_CUTOFF_MS in templates/index.html.
 VERIFICATION_CUTOFF_MS = 1781049600000
+
+# Audit retention (D14): new audit entries carry an `expire_at` timestamp set
+# this many days after creation. Deletion is performed server-side by the
+# Firestore TTL policy on the `audit` collection group, field `expire_at`
+# (see DEPLOY.md) — security rules still deny ALL user deletes (D13).
+AUDIT_RETENTION_DAYS = 90
 
 def ws_meta_url(ws_id: str) -> str:
     """Workspace meta/ACL document (owner_uid, owner_email, members)."""
@@ -90,6 +96,8 @@ def _py_to_fs(value: Any) -> Dict:
     if isinstance(value, str):  return {"stringValue": value}
     if isinstance(value, list): return {"arrayValue": {"values": [_py_to_fs(v) for v in value]}}
     if isinstance(value, dict): return {"mapValue": {"fields": {k: _py_to_fs(v) for k, v in value.items()}}}
+    if isinstance(value, datetime):
+        return {"timestampValue": value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")}
     return {"stringValue": str(value)}
 
 
@@ -708,11 +716,13 @@ def _audit(token: str, ws_id: str, actor_email: str, entry: Dict) -> bool:
     False instead of raising so a failed audit write never rolls back the
     save it records (D12)."""
     try:
+        now = datetime.now(timezone.utc)
         fs_create(token, ws_audit_parent_url(ws_id), {
             "actor_email": actor_email,
-            "created":     datetime.now(timezone.utc).isoformat(),
+            "created":     now.isoformat(),
             "summary":     entry["summary"],
             "changes":     entry["changes"],
+            "expire_at":   now + timedelta(days=AUDIT_RETENTION_DAYS),
         })
         return True
     except FsError:

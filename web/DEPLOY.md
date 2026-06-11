@@ -80,6 +80,34 @@ service cloud.firestore {
 ```
 This lets any signed-in team member read/write the shared schedule.
 
+> **NOTE (2026-06):** the snippet above is the original single-schedule rules and is
+> kept for historical reference only. The CURRENT rules text lives in
+> `web/firestore.rules` (workspaces + invites + notifications + audit) — paste
+> THAT file when publishing.
+
+### Audit-log retention — Firestore TTL (required once, cycle 4 / D14)
+
+Audit entries (`workspaces/{wsId}/audit/{entryId}`) carry an `expire_at`
+timestamp set 90 days after creation (`AUDIT_RETENTION_DAYS` in `app.py`).
+Firestore deletes expired entries server-side via a TTL policy — security
+rules still deny all user deletes, so history stays immutable for users.
+
+1. Google Cloud Console → **Firestore → Time-to-live (TTL)** (or Firebase Console → Firestore → TTL tab)
+2. **Create policy**: collection group `audit`, timestamp field `expire_at`
+3. Wait until the policy state shows **Active** (can take a few minutes)
+
+Or via gcloud:
+```
+gcloud firestore fields ttls update expire_at \
+  --collection-group=audit --enable-ttl --project=medscheduler-e0853
+```
+
+Notes:
+- TTL deletion typically runs within ~24 h after `expire_at` — fine for retention.
+- Entries written before cycle 4 have no `expire_at` and never auto-expire;
+  delete them manually in the Console once if you want a clean cut.
+- Disabling the policy stops future deletions; already-deleted entries are gone.
+
 ### Authorised domains (for web sign-in)
 1. Firebase Console → **Authentication → Settings → Authorised domains**
 2. Add your Render/Railway domain, e.g. `medscheduler.onrender.com`
